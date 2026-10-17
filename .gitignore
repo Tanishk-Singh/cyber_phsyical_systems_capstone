@@ -1,0 +1,120 @@
+# ---------------------------------------------------------------------------
+# Datasets. Never commit these: the raw SWaT/WADI files total ~750 MB and four
+# of them individually exceed GitHub's 100 MB hard limit. They are also
+# redistribution-restricted (SWaT/WADI come from a signed iTrust request).
+# Keep them on disk at these paths; see README for the expected layout.
+# ---------------------------------------------------------------------------
+$$SWAT Dataset A2-Dec 2015/
+WADI.A2_19 Nov 2019/
+HAI/
+data/
+!data/.gitkeep
+
+# Derived/intermediate data
+*.parquet
+*.feather
+*.h5
+*.hdf5
+*.npy
+*.npz
+*.pkl
+*.pickle
+
+# Large source-data formats (belt and braces: nothing above should reach git,
+# but these extensions must never be committed from anywhere in the tree)
+*.xlsx
+*.xls
+*.csv
+!experiments/**/*.csv
+!results/**/*.csv
+
+# ---------------------------------------------------------------------------
+# Papers: copyrighted PDFs (~50 MB, incl. a 40 MB Springer LNCS volume).
+# Reading material, not project source. Keep local, cite in the report.
+# ---------------------------------------------------------------------------
+Papers/
+*.pdf
+
+# ---------------------------------------------------------------------------
+# Experiment outputs and model artifacts
+# ---------------------------------------------------------------------------
+results/
+runs/
+outputs/
+checkpoints/
+models/pretrained/
+wandb/
+mlruns/
+lightning_logs/
+*.ckpt
+*.pt
+*.pth
+*.safetensors
+*.onnx
+
+# HuggingFace / Chronos model cache, if pointed inside the repo
+.cache/
+hf_cache/
+
+# ---------------------------------------------------------------------------
+# Python
+# ---------------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib60/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Environments
+.env
+.venv
+env/
+venv/
+ENV/
+.conda/
+
+# Testing / typing / linting caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+
+# Notebooks
+.ipynb_checkpoints/
+*/.ipynb_checkpoints/*
+
+# ---------------------------------------------------------------------------
+# Office temp/lock files (Word writes these while a .docx is open)
+# ---------------------------------------------------------------------------
+~$*
+.~lock.*
+
+# ---------------------------------------------------------------------------
+# OS cruft
+# ---------------------------------------------------------------------------
+desktop.ini
+Thumbs.db
+ehthumbs.db
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
