@@ -1,0 +1,24 @@
+# Pinned to what's actually installed in the `hpc` env as of 2026-10-17.
+# Install torch separately first (see environment.yml) — it needs the cu126
+# index URL, which plain `pip install -r requirements.txt` won't pass.
+
+# Core data stack
+numpy==2.4.4
+pandas==3.0.6
+scipy==1.17.1
+scikit-learn==1.9.1
+
+# I/O for the raw datasets (SWaT .xlsx, cached parquet)
+openpyxl==3.1.5
+pyarrow==26.0.0
+
+# TSFM / HF ecosystem (model-specific packages — e.g. chronos-forecasting,
+# tsb-ad, gluonts — get added here as each is pinned, not before)
+transformers==5.20.1
+
+# Already present from the hpc env's earlier setup; kept for plotting / einops ops
+matplotlib==3.10.8
+einops==0.8.2
+
+# Test suite (tests/) — Phase A Step 2 onward
+pytest==9.1.1

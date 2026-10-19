@@ -7,8 +7,8 @@
 $$SWAT Dataset A2-Dec 2015/
 WADI.A2_19 Nov 2019/
 HAI/
-data/
-!data/.gitkeep
+/data/
+!/data/.gitkeep
 
 # Derived/intermediate data
 *.parquet
@@ -34,6 +34,17 @@ data/
 # ---------------------------------------------------------------------------
 Papers/
 *.pdf
+
+# ---------------------------------------------------------------------------
+# Working notes and planning docs: kept locally, not published. README.md is
+# the one Markdown file meant for GitHub.
+# ---------------------------------------------------------------------------
+documents/
+CAPSTONE_CONTEXT.md
+ENVIRONMENT.md
+*.docx
+*.md
+!README.md
 
 # ---------------------------------------------------------------------------
 # Experiment outputs and model artifacts

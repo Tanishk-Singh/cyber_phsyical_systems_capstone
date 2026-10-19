@@ -1,0 +1,23 @@
+# Capstone project environment ("hpc").
+#
+# This env is NOT in the default conda envs dir — it lives at E:\conda_env\hpc
+# (created with `conda create --prefix E:\conda_env\hpc python=3.11.4`), on the
+# same drive as the repo and the datasets. Activate with:
+#   conda activate E:\conda_env\hpc
+#
+# To recreate from scratch:
+#   conda create --prefix E:\conda_env\hpc python=3.11 -y
+#   conda activate E:\conda_env\hpc
+#   pip install torch==2.11.0+cu126 torchvision==0.26.0+cu126 torchaudio==2.11.0+cu126 --index-url https://download.pytorch.org/whl/cu126
+#   pip install -r requirements.txt
+#
+# See ENVIRONMENT.md for hardware details and rationale.
+name: hpc
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - pip
+  - ipykernel
+  - pip:
+      - -r requirements.txt

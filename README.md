@@ -1,117 +1,128 @@
 # Time-Series Foundation Models vs. Simple Baselines for ICS Attack Detection
 
 MS Data Science capstone, University of Arizona (College of Information Science).
-Author: Tanishk Singh · Advisor: Prof. Rozhin Yasaei (MITHRA Lab) · PhD contact: Afjal Sarower.
+Author: Tanishk Singh. Advisor: Prof. Rozhin Yasaei (MITHRA Lab). PhD contact: Afjal Sarower.
 
-## The question
+## About
 
-Under honest evaluation and with running cost counted, does a pretrained
-time-series foundation model (TSFM) — with or without **Forecast Fallback** —
-actually beat PCA, windowed PCA, and a small CNN at detecting attacks on
-industrial control systems? And which *kinds* of anomaly does each method catch?
+Time-series foundation models (TSFMs) are pretrained on huge, general-purpose
+collections of time series and then applied to a new domain with little or no
+fine-tuning. They are an attractive idea for industrial control systems (ICS)
+because labeled attack data is scarce and expensive to collect. This project
+asks a direct question: under a fair, honest evaluation, with running cost
+counted, does a pretrained TSFM, with or without a technique called Forecast
+Fallback, actually outperform much simpler methods such as PCA, windowed PCA,
+and a small CNN at detecting attacks on ICS data? And just as importantly,
+which kinds of anomaly does each method actually catch, and which does it miss?
 
-"Honest evaluation" is not decoration. It means, for every method alike:
+"Honest evaluation" is a deliberate choice of words here, not a throwaway
+phrase. It means, applied equally to every method under test:
 
-- **VUS-PR** as the primary metric (range-aware, threshold-independent), with
-  range-based F1 and ROC-AUC reported alongside.
-- **No point-adjusted F1.** Under PA, a random scorer ranks 26th of 33 in TSB-AD.
-- Thresholds fitted on **training / benign-validation data only** — never on test.
-  Both Lowe et al. and Uray et al. tuned on test, which inflates their F1.
-- Results broken out **by anomaly type**, not pooled into one headline number.
+- **VUS-PR** as the primary metric (range-aware and threshold-independent),
+  with range-based F1 and ROC-AUC reported alongside it.
+- **No point-adjusted F1.** Under the point-adjust protocol, a random scorer
+  ranks 26th of 33 methods on the TSB-AD benchmark; it rewards noise.
+- Detection thresholds fitted only on training or held-out normal data, never
+  on the test set. Two of the papers this project builds on tuned thresholds
+  on test data, which inflates their reported F1.
+- Results broken out by anomaly type, rather than collapsed into one headline
+  number that hides where a method actually struggles.
 
-## Why the gap is real
+## The gap
 
 | Prior work | What it showed | What it left open |
 |---|---|---|
-| Lowe, Fung & Bauer (ICML 2026 wksp) | Zero-shot TSFMs copy attacked input into their forecasts, so error collapses inside long attacks. Forecast Fallback recovers 0.1–0.45 ROC-AUC. | No PCA or CNN baseline; thresholds taken from test. |
-| Wen & Chen (arXiv 2608.22968) | A 13.8 KB TCN-AE beat 138 MB MOMENT on C-MAPSS (AUROC 0.957 vs 0.731). | No security data, no attacks. |
-| Fung et al. (ESORICS 2022) | Architecture matters little; preprocessing and metric choice matter a lot. | Predates TSFMs. Code reused here. |
-| Uray et al. (arXiv 2607.12454) | TimesFM on SWaT collapses inside attacks; embeddings + Isolation Forest reach F1 0.480 vs PCA's 0.833. | One model, one dataset, test-tuned threshold. |
-| Liu & Paparrizos — TSB-AD (NeurIPS 2024) | VUS-PR is the most reliable metric; simple methods are strong. | Most TSFMs never tested multivariately. |
-| Kravchik & Shabtai (IEEE TDSC) | Windowed PCA F1 0.879 on SWaT, beating the autoencoder. | No TSFMs. "Try PCA first." |
-| Sarfraz et al. (ICML 2024) | Plain PCA best on SWaT (0.833) and WADI-127 (0.501). | Deep models mostly learn linear maps. |
-| Pinet et al. (MiLeTS @ KDD 2026) | Of 373 real anomaly segments, **none** was purely cross-sensor. Proposes NOISEFLIP / NPROLL injections. | No TSFM, PCA or CNN; synthetic sinusoids only. |
+| Lowe, Fung & Bauer (ICML 2026 workshop) | Zero-shot TSFMs copy attacked input straight into their forecasts, so the forecast error collapses during long attacks. Forecast Fallback recovers 0.1 to 0.45 ROC-AUC. | No PCA or CNN baseline; thresholds taken from the test set. |
+| Wen & Chen (arXiv 2608.22968) | A 13.8 KB TCN-AE beat a 138 MB MOMENT model on C-MAPSS (AUROC 0.957 vs. 0.731). | No security data, no attacks. |
+| Fung et al. (ESORICS 2022) | Architecture matters relatively little; preprocessing and metric choice matter a great deal. | Predates TSFMs. Code from this paper is reused here for the classical baselines. |
+| Uray et al. (arXiv 2607.12454) | TimesFM on SWaT collapses during attacks; embeddings plus Isolation Forest reach F1 0.480 against PCA's 0.833. | One model, one dataset, threshold tuned on test. |
+| Liu & Paparrizos, TSB-AD (NeurIPS 2024) | VUS-PR is the most reliable anomaly-detection metric studied; simple methods are often strong. | Most TSFMs were never tested on multivariate data. |
+| Kravchik & Shabtai (IEEE TDSC) | Windowed PCA reached F1 0.879 on SWaT, beating an autoencoder. | No TSFMs considered. The implicit lesson is "try PCA first." |
+| Sarfraz et al. (ICML 2024) | Plain PCA performed best on SWaT (0.833) and WADI-127 (0.501). | Deep models mostly end up learning something close to a linear map anyway. |
+| Pinet et al. (MiLeTS @ KDD 2026) | Of 373 real anomaly segments studied, none was purely cross-sensor. Proposes NOISEFLIP and NPROLL synthetic injections. | No TSFM, PCA, or CNN tested; only synthetic sinusoidal signals used. |
 
-No paper puts a TSFM **with Forecast Fallback** against **PCA and a CNN** on the
-same ICS data with **marginal-preserving cross-sensor injections** scored **per
-anomaly type**. That combination is the target.
+No existing paper puts a TSFM, with Forecast Fallback, against PCA and a CNN,
+on the same ICS data, using marginal-preserving cross-sensor injections, scored
+per anomaly type. That combination is the target of this project.
 
-## Scope
+## Scope and methodology
 
-1. **Direction 1 — head-to-head** (committed). TSFM ±FF vs PCA, windowed PCA, small CNN. Real attacks plus synthetic cross-sensor injections. Cost measured: latency, memory, energy.
-2. **Direction 2 — root cause** (committed). Ablations isolating *which* property explains the ranking: fixed vs adapting notion of "normal", per-sensor vs joint, history window, pretrained vs plant-fitted, linear vs nonlinear structure.
-3. **Direction 3 — enhancement** (future work). Better FF thresholding, boundary-spike triggers, multivariate fallback.
-4. **Direction 4 — new architectures** (future work). Spiking nets, state-space models.
+The work is organized into two research directions and, within them, two
+implementation phases.
 
-A **null result is an acceptable outcome** ("PCA is enough unless the anomaly is
-type X"). An *unexplainable* result is not — hence Direction 2 runs either way.
-PCA must be tuned carefully: published PCA F1 on SWaT spans 0.23 to 0.88 purely
-on setup, so an under-tuned baseline would invalidate any TSFM win.
+**Direction 1, head-to-head comparison.** A TSFM (with and without Forecast
+Fallback) is compared against PCA, windowed PCA, and a small CNN, on real
+attacks plus synthetic cross-sensor injections designed to leave each
+channel's own marginal distribution unchanged. Cost is measured alongside
+accuracy: latency, memory, and energy on a fixed local GPU.
 
-## Data — not in this repo
+**Direction 2, root cause.** Ablations isolate which specific property
+actually explains the ranking between methods: a fixed versus an adapting
+notion of "normal," per-sensor versus joint modeling, the length of history
+considered, a pretrained versus a plant-fitted model, and linear versus
+nonlinear structure.
 
-Raw datasets are **gitignored**: ~750 MB total, four files exceed GitHub's 100 MB
-limit, and SWaT/WADI are redistribution-restricted under an iTrust agreement.
-Keep them locally at these paths:
+A null result is an acceptable outcome of this project ("PCA is enough unless
+the anomaly is of type X"). An unexplainable result is not, which is why
+Direction 2 runs regardless of what Direction 1 finds. PCA in particular is
+tuned carefully: published PCA F1 scores on SWaT range from 0.23 to 0.88
+depending purely on setup, so an under-tuned baseline would invalidate any
+apparent TSFM advantage.
 
-```
-$$SWAT Dataset A2-Dec 2015/    SWaT_Dataset_Normal_v1.xlsx, SWaT_Dataset_Attack_v0.xlsx,
-                               List_of_attacks_Final(Sheet1).csv
-WADI.A2_19 Nov 2019/           WADI_14days_new.csv, WADI_attackdataLABLE.csv, table_WADI.pdf
-HAI/                           (not yet downloaded — github.com/icsdataset/hai)
-```
+These directions are being executed in phases:
 
-### Verified dataset traps
+- **Phase A**, classical baselines on SWaT. A shared data loader, PCA and
+  windowed PCA, a small CNN autoencoder, a shared detection rule, and a
+  metrics harness, all built as a config-driven package rather than
+  notebook-embedded code, so the same pipeline carries forward unchanged.
+- **Phase B**, TSFM and Forecast Fallback. A pretrained TSFM (Chronos-2) is
+  run zero-shot with the Forecast Fallback rule, first validated on a
+  representative slice of data, reproducing the collapse-and-recovery effect
+  reported by Lowe et al. before scaling up.
 
-Checked directly against the files in this working copy. Each one silently
-corrupts results if missed.
+Later phases extend the same pipeline to the full model times Forecast
+Fallback times injection times ablation grid, across datasets, once Phase A
+and Phase B have produced a working, reproducible result.
 
-**SWaT** — attack set 449,919 rows × 51 sensors @ 1 Hz:
+## Data
 
-- Labels are `Normal` (395,298), `Attack` (54,584), and **`A ttack` — with a
-  space — (37)**. Filtering `label == 'Attack'` silently drops those 37 rows.
-  Match on `'ttack' in label`.
-- 35 contiguous attack segments. Min 101 s, median 444 s, **none under 60 s** —
-  every attack is long-context, precisely the regime where TSFMs are reported
-  to fail. Good news for the hypothesis under test.
-- **One segment (rows 227,831–263,730) runs 35,900 s (~10 h) and contains 66 %
-  of all attack-labeled timesteps.** Any pointwise metric is dominated by this
-  single event; report segment-level results beside it.
-- `List_of_attacks_Final(Sheet1).csv` documents 41 attacks, 5 marked
-  "No Physical Impact" (what Fung et al.'s attack cleaning removes), and names
-  the official taxonomy — Single/Multi Stage × Single/Multi Point — which gives
-  a per-anomaly-type axis on *real* attacks, not just synthetic ones.
-- `openpyxl` needs >10 min on these workbooks; streaming
-  `xl/worksheets/sheet1.xml` out of the zip does it in ~5 s. Convert to Parquet once.
+This repository does not include the raw datasets. They are large (roughly
+750 MB combined, with several individual files over GitHub's 100 MB limit)
+and, in the case of SWaT and WADI, redistribution-restricted under a signed
+iTrust data-use agreement. The project draws on three public ICS datasets:
 
-**WADI** — 127 sensors (the "WADI-127" of Sarfraz et al.):
+- **SWaT** (Secure Water Treatment), a scaled-down water treatment testbed
+  operated by iTrust at the Singapore University of Technology and Design,
+  with roughly 450,000 timesteps across 51 sensors and actuators at 1 Hz,
+  including 35 labeled attack segments.
+- **WADI** (Water Distribution), a related iTrust testbed covering a larger
+  water distribution network, with 127 sensors and actuators and 14 labeled
+  attack segments.
+- **HAI** (HIL-based Augmented ICS), a dataset built on a hardware-in-the-loop
+  testbed combining boiler, turbine, and water-treatment processes.
 
-- The normal file has a **264,000-row gap**: `Row` jumps 335,999 → 600,000, with
-  784,571 rows actually present. **Windows must not span the discontinuity.**
-- Labels are **inverted**: `1` = no attack (162,826), `-1` = attack (9,977),
-  5.8 % attack rate across 14 contiguous segments (88–1,741 s).
-- `Date`/`Time` columns are Excel-mangled (`Time` is mm:ss; CSV uses M/D/Y while
-  `table_WADI.pdf` uses D/M/Y). **Align labels by row index, not timestamp:**
-  the data is 1 Hz starting `2017-10-09 18:00:00`, after which the documented
-  attack times match the label runs with a constant ~3–4 s offset (verified on
-  attacks 1, 2 and 15, spanning the whole file).
+SWaT is the primary dataset for this work; WADI and HAI are brought in later
+to confirm that findings generalize beyond a single testbed.
 
-## Environment
+## Reference papers
 
-Local GPU is a **GTX 1660 Ti, 6 GB** (Turing, no tensor cores) — this bounds
-TSFM batch size and is the main schedule risk. Forecast Fallback is inherently
-sequential (it feeds predictions back into the input), so it cannot be batched
-away: at horizon 1, SWaT's test set alone is 449,919 forward passes per
-configuration. **Decide the stride/subset policy before launching the grid.**
+| Authors | Contribution | Code available |
+|---|---|---|
+| Goh, Adepu, Junejo, Mathur (CRITIS 2016) | Origin paper describing the SWaT testbed itself | No, dataset description only |
+| Kravchik & Shabtai (CPS-SPC 2018 / IEEE TDSC) | Dynamic PCA, 1D-CNN, and autoencoder baselines on SWaT and related datasets | No |
+| Fung, Srinarasi, Lucas, Phee, Bauer (ESORICS 2022) | Comprehensive evaluation of reconstruction-based ICS anomaly detectors | Yes |
+| Liu & Paparrizos, TSB-AD (NeurIPS 2024) | Benchmark introducing the VUS-PR metric and a RobustPCA baseline | Yes |
+| Lowe, Fung, Bauer (ICML 2026 workshop) | Zero-shot TSFMs on ICS data and the Forecast Fallback technique | No |
+| Wen & Chen (arXiv 2608.22968) | Cost-aware comparison of classical methods against TSFMs for industrial monitoring | No |
 
-No existing conda env is usable as-is: the CUDA-enabled one lacks pandas and
-sklearn, the one with pandas has CPU-only torch. A fresh env is needed.
+## Expected outcomes
 
-## Status
-
-Datasets for SWaT and WADI are in hand. HAI is not yet downloaded. Code is at
-the scaffolding stage — see the project board / milestones for current progress.
+A results table comparing PCA, windowed PCA, a small CNN, and a TSFM (with and
+without Forecast Fallback) on SWaT, reported overall, per attack segment, and
+per anomaly type, with accuracy and running cost shown side by side. Either
+outcome, a TSFM advantage or a null result in favor of the simpler baselines,
+is reported together with the ablations from Direction 2 that explain why.
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT, see [LICENSE](LICENSE).

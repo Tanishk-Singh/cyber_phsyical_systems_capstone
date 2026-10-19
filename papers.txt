@@ -1,9 +1,0 @@
-Starting papers (shared by Afjal)
-On the Application of Time-Series Foundation Models for Detecting Long-Context Anomalies in Industrial Control Systems. Lowe, Fung, Bauer (CMU). ICML 2026 Workshop on Foundation Models for Structured Data. Introduces Forecast Fallback.
-Do Time-Series Foundation Models Pay Off for Industrial Monitoring? A Cost-Aware Empirical Study. Wen, Chen (NTUST). arXiv 2608.22968, 2026.
-The 5-paper reading list
-Perspectives from a Comprehensive Evaluation of Reconstruction-based Anomaly Detection in Industrial Control Systems. Fung, Srinarasi, Lucas, Phee, Bauer (CMU). ESORICS 2022. This is the one you pasted in full and have been asking about (τ, w, history length, range-based metrics).
-Exploring Zero-Shot Foundation Models for Multivariate Time Series Anomaly Detection. Uray, Messineo, Kwitt, Huber. arXiv 2607.12454, 2026 (EUROCAST 2026 version of record due; preprint not peer reviewed).
-Anomalies in Multivariate Time Series Benchmarks Are Mostly Univariate. Pinet, Cumin, Berlemont, Vaufreydaz. MiLeTS 2026 @ KDD; arXiv 2606.02670.
-Constrained Concealment Attacks against Reconstruction-based Anomaly Detectors in Industrial Control Systems. Erba, Taormina, Galelli, Pogliani, Carminati, Zanero, Tippenhauer. ACSAC 2020.
-The Elephant in the Room: Towards A Reliable Time-Series Anomaly Detection Benchmark (TSB-AD). Liu, Paparrizos (Ohio State). NeurIPS 2024 Datasets & Benchmarks Track.
