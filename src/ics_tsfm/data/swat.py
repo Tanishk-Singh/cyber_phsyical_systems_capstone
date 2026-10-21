@@ -12,6 +12,7 @@ from pathlib import Path
 import pandas as pd
 
 from ics_tsfm.data._xlsx_fast import fast_xlsx_rows, rows_to_df
+from ics_tsfm.data.swat_corrections import CORRECTED_ATTACK_RANGES, N_ATTACK_ROWS
 
 TIMESTAMP_COL = "Timestamp"
 LABEL_COL = "Normal/Attack"
@@ -37,6 +38,28 @@ def is_attack_mask(df: pd.DataFrame) -> pd.Series:
     equality -- the attack file has 37 rows labeled 'A ttack' (stray space)
     that `label == 'Attack'` would silently miss."""
     return df[LABEL_COL].astype(str).str.contains("ttack", case=False, na=False)
+
+
+def corrected_attack_mask(df: pd.DataFrame) -> pd.Series:
+    """Ground-truth attack mask built from Fung et al.'s corrected row ranges.
+
+    Replaces the file's own label column outright rather than patching it, so
+    anything the attack list does not account for becomes Normal -- including
+    the phantom AM/PM segment and the three attacks that left no trace in the
+    recorded columns. See swat_corrections.py for why the raw labels are wrong.
+
+    Use this, not `is_attack_mask`, for evaluation; `is_attack_mask` stays
+    available so the writeup can quantify what the correction changes."""
+    if len(df) != N_ATTACK_ROWS:
+        raise ValueError(
+            f"Corrected labels are row-indexed against the {N_ATTACK_ROWS}-row SWaT "
+            f"attack file, but this DataFrame has {len(df)} rows -- they cannot be "
+            f"applied to it (the Normal file, or an already-sliced frame)."
+        )
+    mask = pd.Series(False, index=df.index)
+    for start, end, _ in CORRECTED_ATTACK_RANGES:
+        mask.iloc[start:end] = True
+    return mask
 
 
 def attack_segments(is_attack: pd.Series) -> pd.DataFrame:
