@@ -2,8 +2,6 @@
 
 openpyxl takes 10+ minutes on these 100-130MB files; streaming the raw
 worksheet XML out of the zip with regex does the same job in under a minute.
-Validated against openpyxl's output in the exploratory notebook
-(codebase/data_analysis.ipynb) before being promoted here.
 """
 import re
 import zipfile

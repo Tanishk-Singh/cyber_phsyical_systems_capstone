@@ -106,14 +106,14 @@ to confirm that findings generalize beyond a single testbed.
 
 ## Reference papers
 
-| Authors | Contribution | Code available |
-|---|---|---|
-| Goh, Adepu, Junejo, Mathur (CRITIS 2016) | Origin paper describing the SWaT testbed itself | No, dataset description only |
-| Kravchik & Shabtai (CPS-SPC 2018 / IEEE TDSC) | Dynamic PCA, 1D-CNN, and autoencoder baselines on SWaT and related datasets | No |
-| Fung, Srinarasi, Lucas, Phee, Bauer (ESORICS 2022) | Comprehensive evaluation of reconstruction-based ICS anomaly detectors | Yes |
-| Liu & Paparrizos, TSB-AD (NeurIPS 2024) | Benchmark introducing the VUS-PR metric and a RobustPCA baseline | Yes |
-| Lowe, Fung, Bauer (ICML 2026 workshop) | Zero-shot TSFMs on ICS data and the Forecast Fallback technique | No |
-| Wen & Chen (arXiv 2608.22968) | Cost-aware comparison of classical methods against TSFMs for industrial monitoring | No |
+| Authors | Contribution |
+|---|---|
+| Goh, Adepu, Junejo, Mathur (CRITIS 2016) | Origin paper describing the SWaT testbed itself |
+| Kravchik & Shabtai (CPS-SPC 2018 / IEEE TDSC) | Dynamic PCA, 1D-CNN, and autoencoder baselines on SWaT and related datasets |
+| Fung, Srinarasi, Lucas, Phee, Bauer (ESORICS 2022) | Comprehensive evaluation of reconstruction-based ICS anomaly detectors |
+| Liu & Paparrizos, TSB-AD (NeurIPS 2024) | Benchmark introducing the VUS-PR metric and a RobustPCA baseline |
+| Lowe, Fung, Bauer (ICML 2026 workshop) | Zero-shot TSFMs on ICS data and the Forecast Fallback technique |
+| Wen & Chen (arXiv 2608.22968) | Cost-aware comparison of classical methods against TSFMs for industrial monitoring |
 
 ## Expected outcomes
 
