@@ -8,14 +8,13 @@ from ics_tsfm.data.swat_preprocess import (
     BLOCK_ROWS,
     STARTUP_CUTOFF_ROWS,
     model_columns,
-    prepare_swat,
 )
 from ics_tsfm.data.swat import TIMESTAMP_COL, corrected_attack_mask
 
 
 @pytest.fixture(scope="module")
-def split(swat_normal_df, swat_attack_df):
-    return prepare_swat(swat_normal_df, swat_attack_df, seed=0)
+def split(swat_split):
+    return swat_split
 
 
 def test_column_sets(swat_normal_df):
@@ -82,6 +81,14 @@ def test_actuators_constant_in_training_are_kept_and_attack_shows_as_minus_one(s
 def test_test_set_is_the_whole_attack_file_with_corrected_labels(split, swat_attack_df):
     assert split.test.shape == (449_919, 36)
     assert np.array_equal(split.test_is_attack, corrected_attack_mask(swat_attack_df).to_numpy())
+
+
+def test_test_rows_skip_the_file_start_and_the_gap(split):
+    # PCA (0) vs CNN (50): 50 rows at the start + 50 after the 82 s gap
+    assert len(split.test_rows([0, 50])) == 449_919 - 100
+    # the Normal file has no gap, so anchors are the same as the split alone
+    train, val = split.anchors(50)
+    assert len(train) == 386_000 and len(val) == 93_550
 
 
 def test_unknown_column_set_is_rejected(swat_normal_df):

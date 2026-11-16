@@ -8,7 +8,9 @@ Order matters, and each step only ever looks at training rows:
   5. Apply that same scaler to validation and to the Attack file.
 
 Anchors (which samples a windowed model may use) depend on the model's history
-length, so they are not fixed here: call `SwatSplit.anchors(history)`.
+length, so they are not fixed here: call `SwatSplit.anchors(history)` for
+training and validation, and `SwatSplit.test_rows(histories)` for the test
+rows every compared model can score (windows.py explains both).
 
 Where the numbers come from (analysis scripts in codebase/):
   - 75-minute blocks: just above the longest normal plant cycle, 72.9 min
@@ -27,6 +29,7 @@ import pandas as pd
 from sklearn.preprocessing import StandardScaler
 
 from ics_tsfm.data.split import assign_blocks, split_anchors
+from ics_tsfm.data.windows import contiguous_anchors, scored_rows
 from ics_tsfm.data.swat import (
     TIMESTAMP_COL,
     corrected_attack_mask,
@@ -82,8 +85,16 @@ class SwatSplit:
     def anchors(self, history: int) -> tuple[np.ndarray, np.ndarray]:
         """(train_anchors, val_anchors) into `normal` for a model that reads
         `history` rows before each target row. history = 0 for point-wise
-        models (every row is its own sample)."""
-        return split_anchors(self.is_val, history)
+        models (every row is its own sample). Samples crossing a gap in the
+        recording are dropped too (the SWaT Normal file has none)."""
+        train, val = split_anchors(self.is_val, history)
+        clean = contiguous_anchors(self.normal_timestamps, history)
+        return train[clean[train]], val[clean[val]]
+
+    def test_rows(self, histories) -> np.ndarray:
+        """Rows of `test` that every compared model can score: pass the
+        history of every model in the comparison, e.g. [0, 50]."""
+        return scored_rows(self.test_timestamps, histories)
 
 
 def prepare_swat(normal_df: pd.DataFrame, attack_df: pd.DataFrame,
