@@ -113,6 +113,29 @@ class PCADetector:
             done += len(batch)
         return scores
 
+    def score_for_each_k(self, x: np.ndarray, anchors: np.ndarray, ks, batch_size: int = 4096) -> dict:
+        """Scores for several k (each at most the fitted k_) in one pass.
+
+        The directions are orthonormal and sorted, so the leftover for the top
+        k directions is |c|^2 - (sum of the squared coordinates on those k):
+        fit once with the largest k, then read off every smaller k for free.
+        Used for the sensitivity table.
+        """
+        ks = sorted(ks)
+        if ks[-1] > self.k_:
+            raise ValueError(f"k = {ks[-1]} is larger than the fitted k_ = {self.k_}")
+        out = {k: np.empty(len(anchors)) for k in ks}
+        done = 0
+        for flat, batch in _samples(x, anchors, self.window, batch_size):
+            centred = flat - self.mean_
+            coords = centred @ self.components_[:, :ks[-1]]
+            kept = np.cumsum(coords ** 2, axis=1)
+            total = (centred ** 2).sum(axis=1)
+            for k in ks:
+                out[k][done:done + len(batch)] = np.maximum(total - kept[:, k - 1], 0.0)
+            done += len(batch)
+        return out
+
     def score_series(self, x: np.ndarray, anchors: np.ndarray, batch_size: int = 4096) -> np.ndarray:
         """One score per row of `x`: the score at each anchor, NaN elsewhere.
         This is the form Steps 7-8 consume (rows a model cannot score stay NaN)."""

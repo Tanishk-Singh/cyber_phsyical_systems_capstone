@@ -20,5 +20,10 @@ transformers==5.20.1
 matplotlib==3.10.8
 einops==0.8.2
 
+# Metrics: VUS-PR and range-F1 (Phase A Step 8). Install WITHOUT its dependencies:
+#   pip install --no-deps TSB-AD==1.5
+# only TSB_AD.evaluation is used; its model dependencies are not needed.
+# TSB-AD==1.5
+
 # Test suite (tests/) — Phase A Step 2 onward
 pytest==9.1.1
