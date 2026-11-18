@@ -4,7 +4,8 @@ Order matters, and each step only ever looks at training rows:
   1. Cut the startup from the Normal file (first 3.75 h).
   2. Keep the model columns (36 by default).
   3. Cut the rest into 75-minute blocks; 20% of blocks go to validation.
-  4. Fit a StandardScaler on the training blocks only.
+  4. Fit a StandardScaler on the training blocks only (on/off columns can
+     optionally be "step"-scaled instead; see prepare_swat).
   5. Apply that same scaler to validation and to the Attack file.
 
 Anchors (which samples a windowed model may use) depend on the model's history
@@ -22,6 +23,7 @@ Where the numbers come from (analysis scripts in codebase/):
     AIT202 drifts little once the early dosing pulses are in training, and
     attack 6 forces it to 6.0; P205 drifts little and is attack 24's target.
 """
+import re
 from dataclasses import dataclass
 
 import numpy as np
@@ -97,13 +99,36 @@ class SwatSplit:
         return scored_rows(self.test_timestamps, histories)
 
 
+def is_actuator(col: str) -> bool:
+    """Pumps (P101), valves (MV101) and the UV lamp (UV401): discrete columns
+    whose readings are states (1 = off/closed, 2 = on/open, 0 = valve moving).
+    The digits must follow the letters directly, so PIT501 is not a pump."""
+    return re.fullmatch(r"(P|MV|UV)\d{3}", col) is not None
+
+
 def prepare_swat(normal_df: pd.DataFrame, attack_df: pd.DataFrame,
-                 seed: int = 0, column_set: str = "ours") -> SwatSplit:
+                 seed: int = 0, column_set: str = "ours",
+                 actuator_scaling: str = "standard") -> SwatSplit:
     """Run Step 3 end to end on the two loaded SWaT files.
 
     `seed` picks which blocks go to validation; keep it fixed to reproduce a
     run, vary it to check that results do not hinge on one lucky draw.
+
+    `actuator_scaling` decides how on/off columns are scaled (sensors always get
+    standard scaling): "standard" (default) divides by the training spread like
+    any sensor; "step" subtracts the training mean and divides by the step
+    between states, 1. A state that is rare in training gets a tiny spread, so
+    standard scaling blows it up: P301 is on for only 11 training seconds (a
+    blip at hour 22.5), and "on" becomes +187.6 (+1 with "step").
+
+    "step" was tried for the CNN (2026-11-17) and kept as an option only: it
+    made the CNN fit normal data 2-3x more tightly, so its validation-based
+    threshold dropped and false alarms from the drifting stage-4/5 columns rose
+    from about 1-6% to about 64-69% of normal test rows at the 99.9th
+    percentile. Standard scaling was also slightly better for plain PCA.
     """
+    if actuator_scaling not in ("step", "standard"):
+        raise ValueError(f"actuator_scaling must be 'step' or 'standard', got {actuator_scaling!r}")
     columns = model_columns(normal_df, column_set)
     if model_columns(attack_df, column_set) != columns:
         raise ValueError("Normal and Attack files have different sensor columns.")
@@ -117,6 +142,11 @@ def prepare_swat(normal_df: pd.DataFrame, attack_df: pd.DataFrame,
     # divides by 1, so it is 0 throughout training and an attack that switches
     # it off shows up as -1. It is kept, never dropped automatically.
     scaler = StandardScaler().fit(x_normal[~is_val])
+    if actuator_scaling == "step":
+        # transform() computes (x - mean_) / scale_, so a scale of 1 means
+        # "centre on the training mean, measure in state steps"
+        steps = np.array([is_actuator(c) for c in columns])
+        scaler.scale_[steps] = 1.0
 
     return SwatSplit(
         columns=columns,

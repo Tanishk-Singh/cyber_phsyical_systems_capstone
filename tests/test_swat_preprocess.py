@@ -7,7 +7,9 @@ import pytest
 from ics_tsfm.data.swat_preprocess import (
     BLOCK_ROWS,
     STARTUP_CUTOFF_ROWS,
+    is_actuator,
     model_columns,
+    prepare_swat,
 )
 from ics_tsfm.data.swat import TIMESTAMP_COL, corrected_attack_mask
 
@@ -76,6 +78,24 @@ def test_actuators_constant_in_training_are_kept_and_attack_shows_as_minus_one(s
         off = split.test[:, j] == -1
         assert off.sum() > 30_000
         assert split.test_is_attack[off].mean() > 0.99
+
+
+def test_rare_actuator_state_under_standard_and_step_scaling(split, swat_normal_df, swat_attack_df):
+    # P301 is on for 11 training seconds (hour 22.5): standard scaling (the
+    # default) puts "on" at about +187.6; the optional step scaling at about +1,
+    # with every on/off column centred and measured in state steps
+    j = split.columns.index("P301")
+    assert split.normal[~split.is_val, j].max() == pytest.approx(187.6, abs=0.1)
+    step = prepare_swat(swat_normal_df, swat_attack_df, actuator_scaling="step")
+    assert step.normal[~step.is_val, j].max() == pytest.approx(1.0, abs=1e-3)
+    actuators = np.array([is_actuator(c) for c in step.columns])
+    assert np.all(step.scaler.scale_[actuators] == 1.0)
+    assert np.allclose(step.scaler.scale_[~actuators], split.scaler.scale_[~actuators])
+
+
+def test_sensor_columns_are_not_actuators():
+    assert is_actuator("P101") and is_actuator("MV304") and is_actuator("UV401")
+    assert not any(is_actuator(c) for c in ("PIT501", "FIT101", "AIT202", "DPIT301", "LIT401"))
 
 
 def test_test_set_is_the_whole_attack_file_with_corrected_labels(split, swat_attack_df):
