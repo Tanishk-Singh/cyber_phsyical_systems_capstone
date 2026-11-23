@@ -53,15 +53,6 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 SWAT_DIR = Path(os.environ.get("SWAT_DIR", REPO_ROOT / "$$SWAT Dataset A2-Dec 2015"))
 SWAT_FILES = ("SWaT_Dataset_Normal_v1.xlsx", "SWaT_Dataset_Attack_v0.xlsx",
               "List_of_attacks_Final(Sheet1).csv")
-# The Chronos-2 that Lowe et al. (ICML 2026 FMSD workshop) evaluate. The paper
-# names no size or checkpoint; "Chronos-2" is Amazon's 120M flagship (the only
-# other sizes are named chronos-2-small and chronos-2-synth). Its weights were
-# uploaded 2025-10-30 and never changed (later commits touch only the README),
-# so the paper used these same weights; autogluon/chronos-2 is a byte-identical
-# mirror. Pinning the commit and the weight hash keeps every machine on them.
-CHRONOS2_ID = "amazon/chronos-2"
-CHRONOS2_REVISION = "29ec3766d36d6f73f0696f85560a422f50e8498c"
-CHRONOS2_SHA256 = "ddcda3c7508bf2528087723e98a20707cc04b7f370ae275a9fd88078ddba4f42"
 # Installed with --no-deps (see requirements.txt), so it is a comment there
 # and has to be checked by hand here.
 EXTRA_PINS = {"TSB-AD": "1.5"}
@@ -216,40 +207,44 @@ def synthetic_signal(context=512, horizon=16, seed=0):
     return x[:, :context].astype(np.float32), x[:, context:].astype(np.float32)
 
 
-def check_chronos(model_id, device):
+def check_chronos(device):
     print("\n6. Chronos-2")
     import torch
-    from chronos import Chronos2Pipeline
     from huggingface_hub import hf_hub_download
+
+    try:   # the pinned checkpoint lives in the package (why this one: see chronos2.py)
+        from ics_tsfm.models.tsfm.chronos2 import MODEL_ID, REVISION, WEIGHTS_SHA256, Chronos2Forecaster
+    except ImportError as err:
+        record("chronos2_load", "FAIL", f"cannot import the Chronos-2 adapter: {err}")
+        return
 
     start = time.perf_counter()
     try:
-        pipe = Chronos2Pipeline.from_pretrained(model_id, revision=CHRONOS2_REVISION, device_map=device)
-        weights = Path(hf_hub_download(model_id, "model.safetensors", revision=CHRONOS2_REVISION))
+        forecaster = Chronos2Forecaster(device=device)
+        weights = Path(hf_hub_download(MODEL_ID, "model.safetensors", revision=REVISION))
     except Exception as err:  # network, auth, disk: report it, don't crash the report
-        record("chronos2_load", "FAIL", f"could not load {model_id}: {err}")
+        record("chronos2_load", "FAIL", f"could not load {MODEL_ID}: {err}")
         return
     digest = hashlib.sha256(weights.read_bytes()).hexdigest()
-    if digest == CHRONOS2_SHA256:
+    if digest == WEIGHTS_SHA256:
         record("chronos2_weights", "PASS", f"weights match the pinned checkpoint "
-                                           f"(revision {CHRONOS2_REVISION[:10]}, sha256 {digest[:12]})")
+                                           f"(revision {REVISION[:10]}, sha256 {digest[:12]})")
     else:
-        record("chronos2_weights", "FAIL", f"weights hash {digest[:12]} != pinned {CHRONOS2_SHA256[:12]}")
+        record("chronos2_weights", "FAIL", f"weights hash {digest[:12]} != pinned {WEIGHTS_SHA256[:12]}")
+    pipe = forecaster.pipeline
     n_params = sum(p.numel() for p in pipe.model.parameters())
     record("chronos2_load", "PASS",
-           f"{model_id} loaded in {time.perf_counter() - start:.0f} s: {n_params / 1e6:.1f}M parameters, "
+           f"{MODEL_ID} loaded in {time.perf_counter() - start:.0f} s: {n_params / 1e6:.1f}M parameters, "
            f"{pipe.model.dtype}, {pipe.model.device}, context up to {pipe.model_context_length}, "
            f"output patch {pipe.model_output_patch_size}",
            params_m=round(n_params / 1e6, 1), context_length=pipe.model_context_length)
 
     context, future = synthetic_signal()
     horizon = future.shape[1]
-    median = pipe.quantiles.index(0.5)
     # One row with 3 sensors = forecast them together (group attention);
     # three rows with 1 sensor each = forecast each on its own.
-    joint = pipe.predict(context[None], prediction_length=horizon)[0][:, median].cpu().numpy()
-    alone = np.concatenate([p[:, median].cpu().numpy()
-                            for p in pipe.predict(context[:, None, :], prediction_length=horizon)])
+    joint = forecaster.predict(context[None], horizon)[0]
+    alone = forecaster.predict(context[:, None, :], horizon)[:, 0]
     if joint.shape != future.shape or alone.shape != future.shape:
         record("chronos2_forecast", "FAIL", f"unexpected output shapes {joint.shape}, {alone.shape}")
         return
@@ -266,7 +261,7 @@ def check_chronos(model_id, device):
         if pipe.model.device.type == "cuda":
             torch.cuda.synchronize()
         t0 = time.perf_counter()
-        pipe.predict(context[None], prediction_length=horizon)
+        forecaster.predict(context[None], horizon)
         if pipe.model.device.type == "cuda":
             torch.cuda.synchronize()
         times.append(time.perf_counter() - t0)
@@ -279,7 +274,6 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--skip-model", action="store_true", help="skip the Chronos-2 download and forecast")
     parser.add_argument("--skip-benchmark", action="store_true", help="skip the precision benchmark")
-    parser.add_argument("--model-id", default=CHRONOS2_ID)
     parser.add_argument("--device", default=None, help="cuda or cpu (default: cuda if available)")
     args = parser.parse_args()
 
@@ -295,7 +289,7 @@ def main():
     if args.skip_model:
         print("\n6. Chronos-2: skipped (--skip-model)")
     else:
-        check_chronos(args.model_id, device)
+        check_chronos(device)
 
     failed = [r["check"] for r in report if r["status"] == "FAIL"]
     warned = [r["check"] for r in report if r["status"] == "WARN"]
