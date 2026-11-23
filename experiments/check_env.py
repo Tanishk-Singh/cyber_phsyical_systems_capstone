@@ -17,9 +17,10 @@ session, the laptop after an upgrade). It checks, in order:
                     inside the repo) says
   5. model cache    where Hugging Face stores downloaded models, and the
                     free disk space there
-  6. Chronos-2      downloads the model (about 480 MB, once) and forecasts
-                    a small synthetic signal, all sensors together and one
-                    sensor at a time; both must beat "repeat the last value"
+  6. Chronos-2      downloads the pinned checkpoint (about 480 MB, once),
+                    checks its weights hash, and forecasts a small synthetic
+                    signal, all sensors together and one sensor at a time;
+                    both must beat "repeat the last value"
 
 Each check prints PASS, WARN or FAIL. The script exits with code 1 if any
 check fails. A JSON copy of the report goes to results/env_check/<host>.json
@@ -35,6 +36,7 @@ Run from the repo root:
     python experiments/check_env.py --skip-benchmark   # skip the precision test
 """
 import argparse
+import hashlib
 import json
 import os
 import platform
@@ -51,7 +53,15 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 SWAT_DIR = Path(os.environ.get("SWAT_DIR", REPO_ROOT / "$$SWAT Dataset A2-Dec 2015"))
 SWAT_FILES = ("SWaT_Dataset_Normal_v1.xlsx", "SWaT_Dataset_Attack_v0.xlsx",
               "List_of_attacks_Final(Sheet1).csv")
+# The Chronos-2 that Lowe et al. (ICML 2026 FMSD workshop) evaluate. The paper
+# names no size or checkpoint; "Chronos-2" is Amazon's 120M flagship (the only
+# other sizes are named chronos-2-small and chronos-2-synth). Its weights were
+# uploaded 2025-10-30 and never changed (later commits touch only the README),
+# so the paper used these same weights; autogluon/chronos-2 is a byte-identical
+# mirror. Pinning the commit and the weight hash keeps every machine on them.
 CHRONOS2_ID = "amazon/chronos-2"
+CHRONOS2_REVISION = "29ec3766d36d6f73f0696f85560a422f50e8498c"
+CHRONOS2_SHA256 = "ddcda3c7508bf2528087723e98a20707cc04b7f370ae275a9fd88078ddba4f42"
 # Installed with --no-deps (see requirements.txt), so it is a comment there
 # and has to be checked by hand here.
 EXTRA_PINS = {"TSB-AD": "1.5"}
@@ -210,13 +220,21 @@ def check_chronos(model_id, device):
     print("\n6. Chronos-2")
     import torch
     from chronos import Chronos2Pipeline
+    from huggingface_hub import hf_hub_download
 
     start = time.perf_counter()
     try:
-        pipe = Chronos2Pipeline.from_pretrained(model_id, device_map=device)
+        pipe = Chronos2Pipeline.from_pretrained(model_id, revision=CHRONOS2_REVISION, device_map=device)
+        weights = Path(hf_hub_download(model_id, "model.safetensors", revision=CHRONOS2_REVISION))
     except Exception as err:  # network, auth, disk: report it, don't crash the report
         record("chronos2_load", "FAIL", f"could not load {model_id}: {err}")
         return
+    digest = hashlib.sha256(weights.read_bytes()).hexdigest()
+    if digest == CHRONOS2_SHA256:
+        record("chronos2_weights", "PASS", f"weights match the pinned checkpoint "
+                                           f"(revision {CHRONOS2_REVISION[:10]}, sha256 {digest[:12]})")
+    else:
+        record("chronos2_weights", "FAIL", f"weights hash {digest[:12]} != pinned {CHRONOS2_SHA256[:12]}")
     n_params = sum(p.numel() for p in pipe.model.parameters())
     record("chronos2_load", "PASS",
            f"{model_id} loaded in {time.perf_counter() - start:.0f} s: {n_params / 1e6:.1f}M parameters, "
