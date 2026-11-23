@@ -1,11 +1,14 @@
 import os
+from pathlib import Path
 
 import pytest
 
 from ics_tsfm.data.swat import load_swat_attack, load_swat_normal
 from ics_tsfm.data.swat_preprocess import prepare_swat
 
-_DEFAULT_SWAT_DIR = r"E:\UniversityOfArizona\Coursework\Capstone\$$SWAT Dataset A2-Dec 2015"
+# Default: the data folder inside this clone, so the tests find it on any
+# machine without SWAT_DIR set (same rule as codebase/swat_cycle_analysis.py).
+_DEFAULT_SWAT_DIR = str(Path(__file__).resolve().parents[1] / "$$SWAT Dataset A2-Dec 2015")
 
 
 @pytest.fixture(scope="session")

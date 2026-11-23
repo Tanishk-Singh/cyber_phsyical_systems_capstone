@@ -12,9 +12,13 @@ scikit-learn==1.9.1
 openpyxl==3.1.5
 pyarrow==26.0.0
 
-# TSFM / HF ecosystem (model-specific packages — e.g. chronos-forecasting,
-# tsb-ad, gluonts — get added here as each is pinned, not before)
+# TSFM / HF ecosystem (model-specific packages get added here as each is
+# pinned, not before)
 transformers==5.20.1
+# Chronos-2 (Phase B, Step B1). accelerate comes with it; pinned so every
+# machine loads models the same way.
+chronos-forecasting==2.3.2
+accelerate==1.16.0
 
 # Already present from the hpc env's earlier setup; kept for plotting / einops ops
 matplotlib==3.10.8
