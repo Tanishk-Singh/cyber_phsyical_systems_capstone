@@ -34,6 +34,14 @@ What it writes (results/ is git-ignored)
 A setting whose summary.json exists is skipped, so rerunning the same
 command after a shutdown only does the unfinished work.
 
+Running in sessions (shared lab PC)
+-----------------------------------
+  --max-hours 12 or --stop-at 08:00 stops cleanly: no new chunk is started
+  after the limit, everything finished is saved, and the same command run
+  later continues where it stopped. Chunks are about 4 minutes of work at
+  context 4096, so the run ends at most a few minutes after the limit, and
+  even a hard stop (Ctrl+C, shutdown) loses at most one chunk.
+
 The sanity numbers (ROC-AUC, attack vs normal score) are NOT the official
 evaluation; that is Step B6, with the same detection rule and metrics as
 PCA and the CNN. ROC-AUC is also given against the dataset's ORIGINAL labels,
@@ -55,6 +63,7 @@ Run from the repo root:
     python experiments/tsfm/run_swat_chronos2.py --settings 128x1 1024x1      # single settings
     python experiments/tsfm/run_swat_chronos2.py --settings ours --modes joint alone
     python experiments/tsfm/run_swat_chronos2.py --dtype bfloat16 --batch-series 576
+    python experiments/tsfm/run_swat_chronos2.py --settings all --max-hours 12   # a 12-hour session
 """
 import argparse
 import json
@@ -69,7 +78,7 @@ from sklearn.metrics import roc_auc_score
 from ics_tsfm.data.swat import is_attack_mask, load_swat_attack, load_swat_normal
 from ics_tsfm.data.swat_preprocess import prepare_swat
 from ics_tsfm.data.windows import contiguous_anchors
-from ics_tsfm.models.tsfm import ForecastDetector, origins
+from ics_tsfm.models.tsfm import ForecastDetector, TimeLimitReached, origins
 from ics_tsfm.models.tsfm.chronos2 import Chronos2Forecaster
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -139,15 +148,26 @@ def sanity(scores, rows, labels, raw_labels):
 
 
 # --------------------------------------------------------------------- full runs
-def run_setting(split, raw_labels, forecaster, mode, context, horizon):
+def chunk_origins(context):
+    """Forecasts per saved chunk: about 4 minutes of work on the RTX 5080 at
+    context 4096, so a stop (time limit or Ctrl+C) loses at most that much.
+    Short contexts keep the original 8192 so runs started before this rule
+    resume with their existing chunks."""
+    return 8192 if context < 1024 else 2048
+
+
+def run_setting(split, raw_labels, forecaster, mode, context, horizon, deadline):
     name = setting_name(mode, context, horizon, forecaster.dtype)
     out = OUT_DIR / name
     if (out / "summary.json").exists():
         print(f"\n{name}: already done, skipped")
         return
+    if deadline is not None and time.time() >= deadline:
+        raise TimeLimitReached(f"time limit reached before starting {name}")
     out.mkdir(parents=True, exist_ok=True)
     val_rows, test_rows = scored_rows(split, context)
-    det = ForecastDetector(forecaster, context, horizon, joint=(mode == "joint"))
+    det = ForecastDetector(forecaster, context, horizon, joint=(mode == "joint"),
+                           chunk_origins=chunk_origins(context), deadline=deadline)
     print(f"\n{name}: {len(val_rows):,} validation + {len(test_rows):,} test rows, "
           f"{n_origins(val_rows, horizon) + n_origins(test_rows, horizon):,} forecasts")
 
@@ -290,6 +310,10 @@ def main():
     parser.add_argument("--dtype", choices=["float32", "bfloat16", "float16"], default="float32")
     parser.add_argument("--batch-series", type=int, default=144,
                         help="series per forward pass (36 per origin in joint mode)")
+    parser.add_argument("--max-hours", type=float, default=None,
+                        help="stop cleanly after this many hours (rerun the same command to continue)")
+    parser.add_argument("--stop-at", default=None,
+                        help="stop cleanly at this clock time, HH:MM, e.g. 08:00 (the next time it comes round)")
     parser.add_argument("--smoke", action="store_true", help="quick timing and sanity run, see above")
     parser.add_argument("--smoke-origins", type=int, default=24,
                         help="forecasts on EACH side of the attack onset per setting in --smoke")
@@ -310,13 +334,43 @@ def main():
     if args.smoke:
         run_smoke(split, args)
         return
+    deadline = stop_time(args.max_hours, args.stop_at)
+    if deadline is not None:
+        print(f"Will stop cleanly by about {time.strftime('%Y-%m-%d %H:%M', time.localtime(deadline))} "
+              "(the chunk in progress finishes first: at most a few minutes)")
     forecaster = Chronos2Forecaster(batch_size=args.batch_series, dtype=args.dtype)
     # cheapest settings first, so early results arrive quickly
     todo = sorted(parse_settings(args.settings), key=lambda ch: (ch[0] / 16 + 2) / ch[1])
-    for mode in args.modes:
-        for context, horizon in todo:
-            run_setting(split, raw_labels, forecaster, mode, context, horizon)
+    try:
+        for mode in args.modes:
+            for context, horizon in todo:
+                run_setting(split, raw_labels, forecaster, mode, context, horizon, deadline)
+    except TimeLimitReached as stop:
+        print(f"\nSTOPPED: {stop}. Everything finished so far is saved.\n"
+              f"To continue later, run exactly the same command again:\n"
+              f"    python experiments/tsfm/run_swat_chronos2.py {' '.join(sys.argv[1:])}")
+        return
     print("\nAll requested settings done.")
+
+
+def stop_time(max_hours, stop_at):
+    """time.time() value at which to stop, from --max-hours and/or --stop-at
+    (whichever comes first); None for no limit. Counted from now, i.e. after
+    the 2-minute data load."""
+    limits = []
+    if max_hours is not None:
+        limits.append(time.time() + 3600 * max_hours)
+    if stop_at is not None:
+        try:
+            hour, minute = (int(v) for v in stop_at.split(":"))
+        except ValueError:
+            raise SystemExit(f"--stop-at must look like 08:00, got {stop_at!r}")
+        now = time.localtime()
+        target = time.mktime((now.tm_year, now.tm_mon, now.tm_mday, hour, minute, 0, 0, 0, -1))
+        if target <= time.time():
+            target += 24 * 3600   # that time has passed today: tomorrow
+        limits.append(target)
+    return min(limits) if limits else None
 
 
 if __name__ == "__main__":

@@ -1,11 +1,13 @@
 """Tests for the model-independent TSFM plumbing (ForecastDetector) with fake
 forecasters: no model download, CPU, under a second. The Chronos-2 adapter
 gets its own tests in Step B3."""
+import time
+
 import numpy as np
 import pytest
 
 from ics_tsfm.data.windows import contiguous_anchors
-from ics_tsfm.models.tsfm import ForecastDetector, LastValueForecaster, origins
+from ics_tsfm.models.tsfm import ForecastDetector, LastValueForecaster, TimeLimitReached, origins
 
 
 class OldestValueForecaster:
@@ -183,6 +185,26 @@ def test_an_interrupted_run_recomputes_only_the_missing_chunk(tmp_path):
     counter = CountingForecaster()
     again = ForecastDetector(counter, 20, chunk_origins=100, verbose=False).predict(x, rows, cache_dir=tmp_path)
     assert counter.calls == 100 and np.array_equal(full, again)
+
+
+def test_a_time_limit_stops_between_chunks_and_the_run_continues_later(tmp_path):
+    x = np.random.default_rng(5).normal(size=(500, 3)).astype(np.float32)
+    rows = np.arange(20, 500)
+    full = ForecastDetector(LastValueForecaster(), 20, chunk_origins=100, verbose=False).predict(x, rows)
+
+    class DeadlineAfterFirstCall(CountingForecaster):
+        def predict(self, contexts, horizon):
+            det.deadline = time.time() - 1   # the limit passes while chunk 1 is being computed
+            return super().predict(contexts, horizon)
+
+    det = ForecastDetector(DeadlineAfterFirstCall(), 20, chunk_origins=100, verbose=False)
+    with pytest.raises(TimeLimitReached, match="1 of 5"):
+        det.predict(x, rows, cache_dir=tmp_path)
+    assert [f.name for f in tmp_path.glob("chunk_*.npy")] == ["chunk_00000.npy"]
+
+    counter = CountingForecaster()   # next session, no limit
+    again = ForecastDetector(counter, 20, chunk_origins=100, verbose=False).predict(x, rows, cache_dir=tmp_path)
+    assert counter.calls == 380 and np.array_equal(full, again)   # only chunks 2-5 (480 - 100 rows)
 
 
 def test_a_cache_folder_refuses_a_different_run(tmp_path):

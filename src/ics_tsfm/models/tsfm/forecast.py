@@ -54,6 +54,10 @@ Long runs
 Origins are processed in chunks; with `cache_dir` each finished chunk is
 saved, so an interrupted run picks up where it stopped. A manifest in the
 folder records the settings and refuses to mix chunks from different runs.
+With `deadline` (a time.time() value) no new chunk is started once it has
+passed: predict raises TimeLimitReached with every finished chunk saved, and
+the same call later continues from there. This is how runs are split into
+sessions on a shared lab PC.
 """
 import hashlib
 import json
@@ -63,6 +67,10 @@ from pathlib import Path
 from typing import Protocol
 
 import numpy as np
+
+
+class TimeLimitReached(Exception):
+    """The deadline passed between two chunks; the finished chunks are saved."""
 
 
 class Forecaster(Protocol):
@@ -121,12 +129,13 @@ class ForecastDetector:
 
     def __init__(self, forecaster: Forecaster, context: int, horizon: int = 1,
                  joint: bool = True, batch_size: int = 256, chunk_origins: int = 8192,
-                 verbose: bool = True):
+                 deadline: float | None = None, verbose: bool = True):
         if context < 1 or horizon < 1:
             raise ValueError("context and horizon must be at least 1")
         self.forecaster = forecaster
         self.context, self.horizon, self.joint = context, horizon, joint
         self.batch_size, self.chunk_origins = batch_size, chunk_origins
+        self.deadline = deadline
         self.verbose = verbose
 
     @property
@@ -195,6 +204,8 @@ class ForecastDetector:
                 if self.verbose:
                     print(f"    chunk {c + 1}/{n_chunks} already saved, skipped", flush=True)
                 continue
+            if self.deadline is not None and time.time() >= self.deadline:
+                raise TimeLimitReached(f"time limit reached with {c} of {n_chunks} chunks saved")
             forecast = self._forecast(x, part)
             if file is not None:   # write then rename: a killed run never leaves half a file
                 tmp = file.with_suffix(".tmp.npy")
