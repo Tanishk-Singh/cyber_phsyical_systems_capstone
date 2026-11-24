@@ -43,16 +43,23 @@ class Chronos2Forecaster:
 
     batch_size counts SERIES per forward pass, the way the Chronos-2 pipeline
     does: with 36 sensors in joint mode, 256 means about 8 origins per pass.
+    Bigger is not always faster (measured on the laptop: 144 beat 256).
+
+    dtype is the precision the network computes in. The input scaling and the
+    returned forecasts stay float32 either way (the pipeline does this). On
+    the laptop bfloat16 moved forecasts by 0.0005 on average; on the lab's
+    RTX 5080 half precision runs about 3x faster than float32.
     """
 
     def __init__(self, device: str | None = None, batch_size: int = 256,
-                 model_id: str = MODEL_ID, revision: str = REVISION):
+                 dtype: str = "float32", model_id: str = MODEL_ID, revision: str = REVISION):
         import torch
         from chronos import Chronos2Pipeline
 
-        self.model_id, self.revision, self.batch_size = model_id, revision, batch_size
+        self.model_id, self.revision, self.batch_size, self.dtype = model_id, revision, batch_size, dtype
         device = device or ("cuda" if torch.cuda.is_available() else "cpu")
         self.pipeline = Chronos2Pipeline.from_pretrained(model_id, revision=revision, device_map=device)
+        self.pipeline.model.to(getattr(torch, dtype))
         self._median = self.pipeline.quantiles.index(0.5)
 
     @property
@@ -73,4 +80,5 @@ class Chronos2Forecaster:
         return np.stack([f[:, self._median].float().cpu().numpy() for f in forecasts])
 
     def config(self) -> dict:
-        return {"forecaster": "chronos-2", "model_id": self.model_id, "revision": self.revision}
+        return {"forecaster": "chronos-2", "model_id": self.model_id, "revision": self.revision,
+                "dtype": self.dtype}

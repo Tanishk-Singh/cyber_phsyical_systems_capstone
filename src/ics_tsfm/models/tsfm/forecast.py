@@ -186,12 +186,14 @@ class ForecastDetector:
 
         chunks = []
         n_chunks = -(-len(origin_rows) // self.chunk_origins)
-        start_time = time.perf_counter()
+        start_time, computed = time.perf_counter(), 0
         for c in range(n_chunks):
             part = origin_rows[c * self.chunk_origins:(c + 1) * self.chunk_origins]
             file = cache_dir / f"chunk_{c:05d}.npy" if cache_dir is not None else None
             if file is not None and file.exists():
                 chunks.append(np.load(file))
+                if self.verbose:
+                    print(f"    chunk {c + 1}/{n_chunks} already saved, skipped", flush=True)
                 continue
             forecast = self._forecast(x, part)
             if file is not None:   # write then rename: a killed run never leaves half a file
@@ -199,11 +201,12 @@ class ForecastDetector:
                 np.save(tmp, forecast)
                 os.replace(tmp, file)
             chunks.append(forecast)
+            computed += 1
             if self.verbose:
-                done = (c + 1) / n_chunks
                 spent = time.perf_counter() - start_time
-                print(f"    chunk {c + 1}/{n_chunks} ({100 * done:.0f}%), "
-                      f"{spent / 60:.1f} min so far", flush=True)
+                left = spent / computed * (n_chunks - c - 1)   # from the chunks computed in this run
+                print(f"    chunk {c + 1}/{n_chunks} ({100 * (c + 1) / n_chunks:.0f}%), "
+                      f"{spent / 60:.1f} min so far, about {left / 60:.0f} min left", flush=True)
         forecasts = np.concatenate(chunks) if chunks else np.empty((0, x.shape[1], self.horizon))
         return forecasts[which, :, lead]
 
