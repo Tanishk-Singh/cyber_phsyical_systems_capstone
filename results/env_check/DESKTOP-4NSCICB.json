@@ -1,0 +1,79 @@
+{
+  "host": "DESKTOP-4NSCICB",
+  "system": "Windows-10-10.0.26200-SP0",
+  "time": "2026-11-23 15:51:50",
+  "checks": [
+    {
+      "check": "git",
+      "status": "PASS",
+      "message": "commit 987e8f7",
+      "commit": "987e8f7"
+    },
+    {
+      "check": "packages",
+      "status": "PASS",
+      "message": "all 13 pinned packages at the pinned version"
+    },
+    {
+      "check": "torch",
+      "status": "PASS",
+      "message": "torch 2.11.0+cu128, CUDA build 12.8, Python 3.11.0"
+    },
+    {
+      "check": "gpu",
+      "status": "PASS",
+      "message": "NVIDIA GeForce RTX 5080, 15.9 GB, compute capability 12.0",
+      "name": "NVIDIA GeForce RTX 5080",
+      "memory_gb": 15.9,
+      "capability": "12.0"
+    },
+    {
+      "check": "precision",
+      "status": "PASS",
+      "message": "float16 is 3.0x faster than float32 on this card",
+      "tflops": {
+        "float32": 38.3,
+        "float16": 114.91,
+        "bfloat16": 105.34
+      },
+      "fastest": "float16"
+    },
+    {
+      "check": "ics_tsfm",
+      "status": "PASS",
+      "message": "imported from this clone (C:\\Tanishk_Capstone_TSFM_CPS_2026\\src\\ics_tsfm)"
+    },
+    {
+      "check": "swat",
+      "status": "FAIL",
+      "message": "missing in C:\\Tanishk_Capstone_TSFM_CPS_2026\\$$SWAT Dataset A2-Dec 2015 (default folder): SWaT_Dataset_Normal_v1.xlsx, SWaT_Dataset_Attack_v0.xlsx, List_of_attacks_Final(Sheet1).csv"
+    },
+    {
+      "check": "hf_cache",
+      "status": "PASS",
+      "message": "C:\\Tanishk_Capstone_TSFM_CPS_2026\\hf_cache\\hub (HF_HOME), 1340 GB free",
+      "path": "C:\\Tanishk_Capstone_TSFM_CPS_2026\\hf_cache\\hub",
+      "free_gb": 1340.0
+    },
+    {
+      "check": "chronos2_weights",
+      "status": "PASS",
+      "message": "weights match the pinned checkpoint (revision 29ec3766d3, sha256 ddcda3c7508b)"
+    },
+    {
+      "check": "chronos2_load",
+      "status": "PASS",
+      "message": "amazon/chronos-2 loaded in 40 s: 119.5M parameters, torch.float32, cuda:0, context up to 8192, output patch 16",
+      "params_m": 119.5,
+      "context_length": 8192
+    },
+    {
+      "check": "chronos2_forecast",
+      "status": "PASS",
+      "message": "forecast error (MAE) together 0.045, one at a time 0.044, repeat-last-value 0.447",
+      "mae_joint": 0.044957518577575684,
+      "mae_alone": 0.04355449602007866,
+      "mae_naive": 0.4470316469669342
+    }
+  ]
+}
