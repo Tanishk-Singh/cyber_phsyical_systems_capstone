@@ -1,0 +1,195 @@
+{
+  "device": "NVIDIA GeForce RTX 5080",
+  "batch_series": 144,
+  "dtype": "float32",
+  "settings": [
+    {
+      "setting": "joint_I32_H1_float32",
+      "ms_per_forecast": 5.463979168174167,
+      "forecasts_full_run": 544355,
+      "hours_full_run": 0.8262067722476246,
+      "mean_score_before_onset": 0.01340890783408731,
+      "mean_score_after_onset": 0.05044494491872478,
+      "mean_score_validation": 0.02148743789013653,
+      "finite": true
+    },
+    {
+      "setting": "joint_I32_H16_float32",
+      "ms_per_forecast": 5.84837916539982,
+      "forecasts_full_run": 34037,
+      "hours_full_run": 0.05529480045908713,
+      "mean_score_before_onset": 0.04479712713786349,
+      "mean_score_after_onset": 0.07071159606197747,
+      "mean_score_validation": 0.0631541190219858,
+      "finite": true
+    },
+    {
+      "setting": "joint_I32_H32_float32",
+      "ms_per_forecast": 5.509302078280598,
+      "forecasts_full_run": 17020,
+      "hours_full_run": 0.02604675593675994,
+      "mean_score_before_onset": 0.04879153640497779,
+      "mean_score_after_onset": 0.07650129678955979,
+      "mean_score_validation": 0.07491755877578767,
+      "finite": true
+    },
+    {
+      "setting": "joint_I64_H1_float32",
+      "ms_per_forecast": 4.297364580755432,
+      "forecasts_full_run": 544291,
+      "hours_full_run": 0.6497269069510986,
+      "mean_score_before_onset": 0.012896914644355717,
+      "mean_score_after_onset": 0.05549063577616953,
+      "mean_score_validation": 0.020467487233553846,
+      "finite": true
+    },
+    {
+      "setting": "joint_I64_H16_float32",
+      "ms_per_forecast": 4.075770838729416,
+      "forecasts_full_run": 34033,
+      "hours_full_run": 0.03853075248735506,
+      "mean_score_before_onset": 0.04243849332110806,
+      "mean_score_after_onset": 0.06530708714409936,
+      "mean_score_validation": 0.059597183615119155,
+      "finite": true
+    },
+    {
+      "setting": "joint_I64_H32_float32",
+      "ms_per_forecast": 4.839433337717007,
+      "forecasts_full_run": 17018,
+      "hours_full_run": 0.022877076817018897,
+      "mean_score_before_onset": 0.04605945656742711,
+      "mean_score_after_onset": 0.07305468386547052,
+      "mean_score_validation": 0.07190729254720919,
+      "finite": true
+    },
+    {
+      "setting": "joint_I128_H1_float32",
+      "ms_per_forecast": 5.682420829543844,
+      "forecasts_full_run": 544163,
+      "hours_full_run": 0.8589342127408519,
+      "mean_score_before_onset": 0.013873699413959143,
+      "mean_score_after_onset": 0.08137800956114527,
+      "mean_score_validation": 0.020651263717916934,
+      "finite": true
+    },
+    {
+      "setting": "joint_I128_H16_float32",
+      "ms_per_forecast": 5.984887500138332,
+      "forecasts_full_run": 34025,
+      "hours_full_run": 0.05656549922005743,
+      "mean_score_before_onset": 0.03951021150095513,
+      "mean_score_after_onset": 0.06366942665669856,
+      "mean_score_validation": 0.058456925406606526,
+      "finite": true
+    },
+    {
+      "setting": "joint_I128_H32_float32",
+      "ms_per_forecast": 6.017633335432038,
+      "forecasts_full_run": 17014,
+      "hours_full_run": 0.02844000376917797,
+      "mean_score_before_onset": 0.042569980163041164,
+      "mean_score_after_onset": 0.07062556276307493,
+      "mean_score_validation": 0.07088144983512623,
+      "finite": true
+    },
+    {
+      "setting": "joint_I4096_H1_float32",
+      "ms_per_forecast": 127.19212708179839,
+      "forecasts_full_run": 536227,
+      "hours_full_run": 18.94551464685875,
+      "mean_score_before_onset": 0.016780879458786594,
+      "mean_score_after_onset": 0.039493944748374636,
+      "mean_score_validation": 0.02585620992342493,
+      "finite": true
+    }
+  ],
+  "batch_sweep": [
+    {
+      "context": 128,
+      "batch_series": 72,
+      "forecasts_per_s": 88.90664140449913,
+      "peak_gb": 0.481569766998291
+    },
+    {
+      "context": 128,
+      "batch_series": 144,
+      "forecasts_per_s": 174.43665359783276,
+      "peak_gb": 0.5105414390563965
+    },
+    {
+      "context": 128,
+      "batch_series": 288,
+      "forecasts_per_s": 191.6765266404773,
+      "peak_gb": 0.6088128089904785
+    },
+    {
+      "context": 128,
+      "batch_series": 576,
+      "forecasts_per_s": 175.3797358833546,
+      "peak_gb": 0.9370088577270508
+    },
+    {
+      "context": 128,
+      "batch_series": 1152,
+      "forecasts_per_s": 105.98464370810083,
+      "peak_gb": 2.112751007080078
+    },
+    {
+      "context": 128,
+      "batch_series": 2304,
+      "forecasts_per_s": 67.2791711034919,
+      "peak_gb": 6.538761615753174
+    },
+    {
+      "context": 4096,
+      "batch_series": 72,
+      "forecasts_per_s": 7.768309049776986,
+      "peak_gb": 1.1557908058166504
+    },
+    {
+      "context": 4096,
+      "batch_series": 144,
+      "forecasts_per_s": 7.768388758304487,
+      "peak_gb": 1.8922715187072754
+    },
+    {
+      "context": 4096,
+      "batch_series": 288,
+      "forecasts_per_s": 7.365264285884928,
+      "peak_gb": 4.408790111541748
+    },
+    {
+      "context": 4096,
+      "batch_series": 576,
+      "forecasts_per_s": 1.4777567909252676,
+      "peak_gb": 12.827366828918457
+    },
+    {
+      "context": 4096,
+      "batch_series": 1152,
+      "forecasts_per_s": null
+    },
+    {
+      "context": 4096,
+      "batch_series": 2304,
+      "forecasts_per_s": null
+    }
+  ],
+  "precision": [
+    {
+      "context": 128,
+      "speedup": 1.2800027350925176,
+      "max_abs_score_diff": 0.0059788466972446885,
+      "median_score": 0.018800070068499247,
+      "max_diff_over_median_score": 0.3180225752063892
+    },
+    {
+      "context": 4096,
+      "speedup": 1.9497525256310855,
+      "max_abs_score_diff": 0.002894742642216938,
+      "median_score": 0.018561401866638266,
+      "max_diff_over_median_score": 0.15595495765973721
+    }
+  ]
+}
