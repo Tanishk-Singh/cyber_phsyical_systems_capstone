@@ -168,6 +168,23 @@ class ForecastDetector:
                 "x_shape": list(x.shape),
                 "x_sha1": hashlib.sha1(np.ascontiguousarray(x, np.float32)).hexdigest()}
 
+    def _open_cache(self, cache_dir, x: np.ndarray, rows: np.ndarray) -> Path:
+        """Create cache_dir with this run's manifest, or check that the
+        manifest already in it describes this same run."""
+        cache_dir = Path(cache_dir)
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        manifest = self._manifest(x, rows)
+        path = cache_dir / "manifest.json"
+        if path.exists():
+            saved = json.loads(path.read_text())
+            if saved != manifest:
+                changed = sorted(k for k in manifest.keys() | saved.keys() if saved.get(k) != manifest.get(k))
+                raise ValueError(f"{cache_dir} holds a different run (differs in {changed}); "
+                                 "delete it or pass another cache_dir")
+        else:
+            path.write_text(json.dumps(manifest, indent=2))
+        return cache_dir
+
     def predict(self, x: np.ndarray, rows: np.ndarray, cache_dir=None) -> np.ndarray:
         """(len(rows), n_sensors) forecast for each row, in the order given."""
         rows = np.asarray(rows, np.int64)
@@ -180,18 +197,7 @@ class ForecastDetector:
         which = np.cumsum(is_origin) - 1
 
         if cache_dir is not None:
-            cache_dir = Path(cache_dir)
-            cache_dir.mkdir(parents=True, exist_ok=True)
-            manifest = self._manifest(x, rows)
-            path = cache_dir / "manifest.json"
-            if path.exists():
-                saved = json.loads(path.read_text())
-                if saved != manifest:
-                    changed = sorted(k for k in manifest if saved.get(k) != manifest[k])
-                    raise ValueError(f"{cache_dir} holds a different run (differs in {changed}); "
-                                     "delete it or pass another cache_dir")
-            else:
-                path.write_text(json.dumps(manifest, indent=2))
+            cache_dir = self._open_cache(cache_dir, x, rows)
 
         chunks = []
         n_chunks = -(-len(origin_rows) // self.chunk_origins)
