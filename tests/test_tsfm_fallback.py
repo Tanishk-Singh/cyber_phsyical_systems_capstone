@@ -392,3 +392,68 @@ def test_a_bounded_run_resumes_to_the_same_result(tmp_path):
     with pytest.raises(ValueError, match="fallback_max_rows"):
         ForecastFallbackDetector(MeanForecaster(), 50, np.full(2, 0.1), max_fallback=31,
                                  verbose=False).run(x, rows, cache_dir=tmp_path)
+
+
+# --- addition C (clamped surrogates) ---------------------------------------------------
+
+
+class HundredForecaster(ZeroForecaster):
+    """Always predicts 100, far outside the data's range."""
+
+    def predict(self, contexts, horizon):
+        return super().predict(contexts, horizon) + 100.0
+
+
+def test_clamped_surrogates_stay_inside_the_range_but_forecasts_do_not():
+    x = np.zeros((40, 1), np.float32)
+    rows = np.arange(10, 40)
+    spy = HundredForecaster()
+    det = ForecastFallbackDetector(spy, 10, np.ones(1), clamp=(np.array([-1.0]), np.array([1.0])), verbose=False)
+    forecasts, fallback = det.run(x, rows)
+    assert rows[fallback[:, 0]][0] == 12 and fallback[2:, 0].all()   # 3 rows in a row, then stays
+    assert (forecasts == 100).all()                                   # scores use the real forecast
+    context_of = dict(zip(rows, spy.contexts))
+    assert context_of[20][0, -8:].tolist() == [1.0] * 8               # rows 12-19 stand in as 1, not 100
+
+
+def test_clamping_stops_the_runaway_and_keeps_the_frozen_reference():
+    x = triangle()
+    rows = np.arange(20, 1500)
+    clamped, clamped_fb = ForecastFallbackDetector(TrendForecaster(), 20, np.full(1, 0.01),
+                                                   clamp=(np.zeros(1), np.ones(1)), verbose=False).run(x, rows)
+    assert np.abs(clamped).max() < 2          # bounded by the range plus at most one step of trend
+    # no release by time: the frozen value sits at the bottom edge of the range, and the sensor
+    # leaves fallback only where the real ramp comes back down to it
+    released = ~clamped_fb[-500:, 0]
+    assert clamped_fb[-500:, 0].mean() > 0.9 and (x[rows[-500:]][released, 0] < 0.35).all()
+
+
+def test_a_clamped_run_resumes_to_the_same_result(tmp_path):
+    x = held_attack()
+    rows = np.arange(50, 1000)
+    clamp = (np.full(2, -0.05), np.full(2, 0.05))   # binds: surrogates during the attack are about 0.12
+    kwargs = dict(thresholds=np.full(2, 0.1), clamp=clamp, verbose=False)
+    full = ForecastFallbackDetector(MeanForecaster(), 50, **kwargs).run(x, rows)
+    unclamped = ForecastFallbackDetector(MeanForecaster(), 50, np.full(2, 0.1), verbose=False).run(x, rows)
+    assert not np.array_equal(full[0], unclamped[0])   # the clamp changed later forecasts
+
+    class DeadlineAfter(MeanForecaster):
+        def predict(self, contexts, horizon):
+            if self.calls == 600:
+                det.deadline = time.time() - 1
+            return super().predict(contexts, horizon)
+
+    det = ForecastFallbackDetector(DeadlineAfter(), 50, **kwargs)
+    with pytest.raises(TimeLimitReached):
+        det.run(x, rows, cache_dir=tmp_path)
+    again = ForecastFallbackDetector(MeanForecaster(), 50, **kwargs).run(x, rows, cache_dir=tmp_path)
+    assert np.array_equal(full[0], again[0]) and np.array_equal(full[1], again[1])
+    with pytest.raises(ValueError, match="fallback_clamp_sha1"):
+        ForecastFallbackDetector(MeanForecaster(), 50, np.full(2, 0.1), clamp=(clamp[0], clamp[1] * 2),
+                                 verbose=False).run(x, rows, cache_dir=tmp_path)
+
+
+def test_bad_clamps_are_refused():
+    for clamp in ((np.ones(2), np.zeros(2)), (np.zeros(3), np.ones(3)), (np.zeros(2), np.array([1.0, np.inf]))):
+        with pytest.raises(ValueError, match="clamp"):
+            ForecastFallbackDetector(ZeroForecaster(), 10, np.ones(2), clamp=clamp)

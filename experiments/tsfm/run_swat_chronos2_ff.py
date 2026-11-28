@@ -14,9 +14,13 @@ Variants
   bounded  ours: one threshold per sensor AND forecast step (addition A), and
            a sensor leaves fallback after at most `context` rows in a row,
            with its real values put back into the input (addition B).
-Why: on SWaT at context 128, horizon 32, the literal rule put tank levels
-into fallback on most benign rows, and their forecasts ran away; see the
-fallback module's docstring. At horizon 1 the two variants differ only by B.
+  clamped  ours: per-lead thresholds (A), no release by time, and every value
+           that stands in for a sensor clipped to that sensor's range on the
+           Normal-file training rows (addition C).
+Why: on SWaT the literal rule put tank levels into fallback on most benign
+rows and their forecasts ran away, which inflated its ROC-AUC with time since
+the run started; bounded stayed sane but re-synced to the attacker. See the
+fallback module's docstring. At horizon 1, A changes nothing.
 
 Per setting
 -----------
@@ -36,7 +40,7 @@ What it writes (results/ is git-ignored)
   results/tsfm/chronos2_ff/<mode>_I<context>_H<horizon>_<dtype>/
     thresholds.json          both kinds of thresholds and how they were made
     cache_train/             plain forecasts for the thresholds (resumable chunks)
-    lowe/, bounded/          one folder per variant:
+    lowe/, bounded/, clamped/  one folder per variant:
       val_scores.npy, test_scores.npy   one score per row (NaN = not scored)
       val_fallback.npy, test_fallback.npy
                              sensors in fallback at each row (-1 = not scored)
@@ -103,9 +107,10 @@ from run_swat_chronos2 import (REPO_ROOT, SMOKE_DIR, SWAT_DIR, Tee, chunk_origin
 
 OUT_DIR = REPO_ROOT / "results" / "tsfm" / "chronos2_ff"
 TRAIN_ROWS_PER_LEAD = 30_000
-VARIANTS = {   # per-lead thresholds (addition A), most fallback rows in a row (addition B)
-    "lowe": {"per_lead": False, "bounded": False},
-    "bounded": {"per_lead": True, "bounded": True},
+VARIANTS = {   # per-lead thresholds (A), release after `context` rows (B), clip surrogates (C)
+    "lowe": {"per_lead": False, "bounded": False, "clamped": False},
+    "bounded": {"per_lead": True, "bounded": True, "clamped": False},
+    "clamped": {"per_lead": True, "bounded": False, "clamped": True},
 }
 
 
@@ -137,12 +142,21 @@ def fallback_counts(n, rows, fallback):
     return counts
 
 
-def detector(forecaster, mode, context, horizon, thresholds, variant, deadline=None, verbose=True):
-    """The fallback detector of one variant; thresholds = (shared, per_lead)."""
+def training_range(split):
+    """(low, high): each column's smallest and largest value on the
+    Normal-file training rows, scaled; the clamp range of addition C."""
+    train = split.normal[~split.is_val]
+    return train.min(axis=0), train.max(axis=0)
+
+
+def detector(forecaster, mode, context, horizon, thresholds, variant, clamp, deadline=None, verbose=True):
+    """The fallback detector of one variant; thresholds = (shared, per_lead),
+    clamp = training_range(split)."""
     spec = VARIANTS[variant]
     return ForecastFallbackDetector(forecaster, context, thresholds[1] if spec["per_lead"] else thresholds[0],
                                     horizon, joint=(mode == "joint"),
                                     max_fallback=context if spec["bounded"] else None,
+                                    clamp=clamp if spec["clamped"] else None,
                                     deadline=deadline, verbose=verbose)
 
 
@@ -178,7 +192,7 @@ def thresholds_for(split, forecaster, mode, context, horizon, out, deadline):
 def run_variant(split, raw_labels, forecaster, mode, context, horizon, thresholds, variant, out, deadline):
     out.mkdir(parents=True, exist_ok=True)
     val_rows, test_rows = scored_rows(split, context)
-    det = detector(forecaster, mode, context, horizon, thresholds, variant, deadline)
+    det = detector(forecaster, mode, context, horizon, thresholds, variant, training_range(split), deadline)
     start = time.perf_counter()
     print(f"  {variant}: validation rows (Normal file), with fallback")
     val_pred, val_fb = det.run(split.normal, val_rows, cache_dir=out / "state_val")
@@ -293,7 +307,8 @@ def run_smoke(split, args):
             per_forecast = sec_train / n_origins(sample, horizon)
 
             for variant in args.variants:
-                ff = detector(forecaster, mode, context, horizon, thresholds, variant, verbose=False)
+                ff = detector(forecaster, mode, context, horizon, thresholds, variant, training_range(split),
+                              verbose=False)
                 (pred, fb), sec_test = clock(lambda: ff.run(split.test, two_runs))
                 _, sec_val = clock(lambda: ff.run(split.normal, val_part))
                 per_step_test = sec_test / lockstep_steps(two_runs, horizon)
@@ -336,7 +351,7 @@ def main():
     parser.add_argument("--settings", nargs="+", default=["all"],
                         help="lowe, ours, all, and/or CONTEXTxHORIZON items such as 128x32")
     parser.add_argument("--variants", nargs="+", choices=list(VARIANTS), default=list(VARIANTS),
-                        help="lowe = the published rule, bounded = ours (per-lead thresholds, bounded fallback)")
+                        help="lowe = the published rule; bounded, clamped = ours (see above)")
     parser.add_argument("--modes", nargs="+", choices=["joint", "alone"], default=["joint"])
     parser.add_argument("--dtype", choices=["float32", "bfloat16", "float16"], default="float32")
     parser.add_argument("--batch-series", type=int, default=144,

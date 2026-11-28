@@ -73,6 +73,20 @@ class TimeLimitReached(Exception):
     """The deadline passed between two chunks; the finished chunks are saved."""
 
 
+def replace_file(tmp: Path, path: Path, attempts: int = 10) -> None:
+    """os.replace(tmp, path), retried for a moment if Windows refuses: an
+    antivirus scan or the search indexer can hold a just-written file, which
+    would otherwise stop a long run at a random checkpoint."""
+    for attempt in range(attempts):
+        try:
+            os.replace(tmp, path)
+            return
+        except PermissionError:
+            if attempt == attempts - 1:
+                raise
+            time.sleep(0.1 * (attempt + 1))
+
+
 class Forecaster(Protocol):
     """What ForecastDetector needs from a model (Chronos-2, Moirai, a fake)."""
 
@@ -216,7 +230,7 @@ class ForecastDetector:
             if file is not None:   # write then rename: a killed run never leaves half a file
                 tmp = file.with_suffix(".tmp.npy")
                 np.save(tmp, forecast)
-                os.replace(tmp, file)
+                replace_file(tmp, file)
             chunks.append(forecast)
             computed += 1
             if self.verbose:

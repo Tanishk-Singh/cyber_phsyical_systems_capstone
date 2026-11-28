@@ -66,6 +66,7 @@ TSFM_RUNS = {   # display label: summary files to look for, under results/tsfm/
     "Chronos-2": "chronos2/*/summary.json",                         # Step B4, no fallback
     "Chronos-2 FF-Lowe": "chronos2_ff/*/lowe/summary.json",         # Step B5, the published rule
     "Chronos-2 FF-bounded": "chronos2_ff/*/bounded/summary.json",   # Step B5, ours (additions A + B)
+    "Chronos-2 FF-clamped": "chronos2_ff/*/clamped/summary.json",   # Step B5, ours (additions A + C)
 }
 OUT_DIR = RESULTS / "tsfm_eval"
 CACHE = OUT_DIR / "cache"

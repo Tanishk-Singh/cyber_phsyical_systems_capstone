@@ -72,6 +72,18 @@ default, so the literal rule stays available as the reproduction.
      from a context made only of its own forecasts. The price: an attack
      held for longer than max_fallback rows is copied again after the
      release, as without fallback.
+  C. Clamped surrogates (`clamp` = (low, high) per sensor). Run on SWaT, B
+     kept scores sane but re-synced to the attacker, so long attacks were
+     copied again (context 32, horizon 32: ROC-AUC 0.23 vs 0.64 for the
+     literal rule). The literal rule's high ROC-AUC, though, came largely
+     from the runaway: its scores grew with time since the run started
+     (rank correlation 0.91), and a "detector" that only counts those
+     seconds scored higher (0.77 vs 0.70 at context 128). C keeps the
+     literal rule's frozen reference (no release by time) but clips every
+     value that stands in for a sensor to [low, high], the run script's
+     benign training range of that sensor. A runaway ramp then flattens at
+     the edge of the normal range instead of growing without end. Only the
+     input is clipped; the forecasts, errors and scores are not.
 
 Why forecasts are made one origin at a time
 -------------------------------------------
@@ -94,7 +106,7 @@ and continues; the result is the same as an uninterrupted run, because the
 saved state is everything the remaining forecasts depend on. A hard stop
 (Ctrl+C, shutdown) loses at most the work since the last checkpoint. A
 manifest refuses a folder that belongs to a different run (other thresholds,
-trigger, max_fallback, rows, data or model).
+trigger, max_fallback, clamp, rows, data or model).
 
 Repeatability
 -------------
@@ -110,13 +122,13 @@ means fallback runs repeat bit for bit only with the same batches: same
 rows, same batch_size, same GPU. A resumed run uses the same batches.
 """
 import hashlib
-import os
 import time
 from pathlib import Path
 
 import numpy as np
 
-from ics_tsfm.models.tsfm.forecast import ForecastDetector, Forecaster, TimeLimitReached, origins
+from ics_tsfm.models.tsfm.forecast import (ForecastDetector, Forecaster, TimeLimitReached, origins,
+                                           replace_file)
 
 FF_PERCENTILE = 99.5
 FF_TRIGGER = 3
@@ -182,7 +194,7 @@ def _save_atomic(path: Path, **arrays) -> None:
     tmp = path.with_name(path.stem + ".tmp.npz")
     with open(tmp, "wb") as f:
         np.savez(f, **arrays)
-    os.replace(tmp, path)
+    replace_file(tmp, path)
 
 
 class ForecastFallbackDetector(ForecastDetector):
@@ -196,7 +208,9 @@ class ForecastFallbackDetector(ForecastDetector):
     thresholds: (n_sensors,) for Lowe et al.'s rule, or (horizon, n_sensors)
     for one threshold per lead (addition A). max_fallback: None for Lowe et
     al.'s rule, or the most rows in a row a sensor stays in fallback
-    (addition B). predict / errors / score / score_series work as in
+    (addition B). clamp: None, or (low, high) arrays per sensor that the
+    values standing in for a sensor are clipped to (addition C).
+    predict / errors / score / score_series work as in
     ForecastDetector and return the fallback forecasts; `run` also returns
     which rows were in fallback. batch_size counts origins per forecaster
     call (all runs' current origins go into one call, split into batches of
@@ -205,8 +219,8 @@ class ForecastFallbackDetector(ForecastDetector):
 
     def __init__(self, forecaster: Forecaster, context: int, thresholds: np.ndarray, horizon: int = 1,
                  joint: bool = True, trigger: int = FF_TRIGGER, max_fallback: int | None = None,
-                 batch_size: int = 256, checkpoint_minutes: float = 5.0, deadline: float | None = None,
-                 verbose: bool = True):
+                 clamp: tuple[np.ndarray, np.ndarray] | None = None, batch_size: int = 256,
+                 checkpoint_minutes: float = 5.0, deadline: float | None = None, verbose: bool = True):
         super().__init__(forecaster, context, horizon, joint, batch_size, deadline=deadline, verbose=verbose)
         thresholds = np.asarray(thresholds, float)
         if thresholds.ndim not in (1, 2) or np.isnan(thresholds).any() or (thresholds < 0).any():
@@ -217,7 +231,12 @@ class ForecastFallbackDetector(ForecastDetector):
             raise ValueError("trigger must be at least 1")
         if max_fallback is not None and max_fallback < 1:
             raise ValueError("max_fallback must be at least 1 (or None for no limit)")
-        self.thresholds, self.trigger, self.max_fallback = thresholds, trigger, max_fallback
+        if clamp is not None:
+            clamp = tuple(np.asarray(c, float) for c in clamp)
+            if (len(clamp) != 2 or clamp[0].shape != (thresholds.shape[-1],) or clamp[1].shape != clamp[0].shape
+                    or not np.isfinite(clamp).all() or (clamp[0] > clamp[1]).any()):
+                raise ValueError("clamp must be (low, high), one finite value per sensor each, low <= high")
+        self.thresholds, self.trigger, self.max_fallback, self.clamp = thresholds, trigger, max_fallback, clamp
         # one row of thresholds per lead, whichever form was given
         self._lead_thresholds = np.broadcast_to(thresholds, (horizon, thresholds.shape[-1]))
         self.checkpoint_minutes = checkpoint_minutes
@@ -225,12 +244,19 @@ class ForecastFallbackDetector(ForecastDetector):
     def config(self) -> dict:
         return {**super().config(), "fallback_trigger": self.trigger,
                 "fallback_per_lead": self.thresholds.ndim == 2, "fallback_max_rows": self.max_fallback,
+                "fallback_clamp_sha1": (None if self.clamp is None
+                                        else hashlib.sha1(np.ascontiguousarray(self.clamp)).hexdigest()),
                 "fallback_thresholds_sha1": hashlib.sha1(np.ascontiguousarray(self.thresholds)).hexdigest()}
 
     def _manifest(self, x: np.ndarray, rows: np.ndarray) -> dict:
         manifest = super()._manifest(x, rows)
         del manifest["chunk_origins"]   # fallback runs save a state, not chunks
         return manifest
+
+    def _surrogate(self, forecasts: np.ndarray) -> np.ndarray:
+        """The values that stand in for sensors in fallback: the forecasts,
+        clipped to the clamp range if there is one (addition C)."""
+        return forecasts if self.clamp is None else np.clip(forecasts, *self.clamp).astype(np.float32)
 
     def predict(self, x: np.ndarray, rows: np.ndarray, cache_dir=None) -> np.ndarray:
         """(len(rows), n_sensors) fallback forecast for each row, in the order given."""
@@ -291,7 +317,7 @@ class ForecastFallbackDetector(ForecastDetector):
         # the input the forecaster reads: real data, with the replaced values put back
         x_in = np.array(x, dtype=np.float32)
         done = step_of_row < done_steps
-        x_in[rows[done]] = np.where(replaced[done], forecasts[done], x_in[rows[done]])
+        x_in[rows[done]] = np.where(replaced[done], self._surrogate(forecasts[done]), x_in[rows[done]])
 
         def save(steps):
             _save_atomic(state_path, forecasts=forecasts, fallback=fallback, replaced=replaced,
@@ -322,7 +348,7 @@ class ForecastFallbackDetector(ForecastDetector):
                         count[expired] = 0
                         replace &= ~expired
                     length = np.where(replace, length + 1, 0)
-                    x_in[rows[i], replace] = guess[replace]
+                    x_in[rows[i], replace] = self._surrogate(guess)[replace]
                     forecasts[i], fallback[i], replaced[i] = guess, replace, replace
                 counts[run], lengths[run] = count, length
             now = time.perf_counter()
