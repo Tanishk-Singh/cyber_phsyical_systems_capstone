@@ -270,3 +270,125 @@ def test_last_value_forecaster_never_triggers_on_a_held_step():
     rows = np.arange(50, 1000)
     _, fallback = ForecastFallbackDetector(LastValueForecaster(), 50, np.full(2, 0.1), verbose=False).run(x, rows)
     assert not fallback.any()
+
+
+# --- additions A (per-lead thresholds) and B (bounded fallback) -----------------------
+
+
+class TrendForecaster:
+    """Continues the straight line through the first and last context value:
+    the forecaster that runs away when it reads only its own forecasts."""
+
+    def predict(self, contexts, horizon):
+        slope = (contexts[..., -1:] - contexts[..., :1]) / (contexts.shape[-1] - 1)
+        return contexts[..., -1:] + slope * np.arange(1, horizon + 1)
+
+    def config(self):
+        return {"forecaster": "trend"}
+
+
+def triangle(n=1500, period=100):
+    """One sensor ramping up and down between 0 and 1, like a tank level."""
+    t = np.arange(n)
+    return (np.abs((t % period) / (period / 2) - 1)[:, None]).astype(np.float32)
+
+
+def test_each_lead_is_compared_with_its_own_threshold():
+    x = np.zeros((60, 1), np.float32)
+    x[:, 0] = 5.0   # forecast is always 0, so every row's error is 5
+    rows = np.arange(10, 60)
+    shared = ForecastFallbackDetector(ZeroForecaster(), 10, np.ones(1), horizon=2, verbose=False)
+    per_lead = ForecastFallbackDetector(ZeroForecaster(), 10, np.array([[1.0], [10.0]]), horizon=2, verbose=False)
+    assert shared.run(x, rows)[1][2:].all()   # every row exceeds: fallback from the third row on
+    assert not per_lead.run(x, rows)[1].any()   # lead-1 rows stay under 10: never 3 in a row
+
+
+def test_per_lead_thresholds_are_percentiles_at_each_lead():
+    errors = np.c_[np.r_[np.arange(100.0), 1000 + np.arange(100.0)]]
+    leads = np.r_[np.zeros(100, int), np.ones(100, int)]
+    thresholds = fallback_thresholds(errors, leads, horizon=2)
+    assert thresholds.shape == (2, 1)
+    assert thresholds[0, 0] == pytest.approx(np.percentile(np.arange(100.0), 99.5))
+    assert thresholds[1, 0] == pytest.approx(np.percentile(1000 + np.arange(100.0), 99.5))
+    with pytest.raises(ValueError, match="missing"):
+        fallback_thresholds(errors, np.zeros(200, int), horizon=2)
+
+
+def test_per_lead_thresholds_must_match_the_horizon():
+    with pytest.raises(ValueError, match="3 leads for horizon 2"):
+        ForecastFallbackDetector(ZeroForecaster(), 10, np.ones((3, 1)), horizon=2)
+    with pytest.raises(ValueError, match="max_fallback"):
+        ForecastFallbackDetector(ZeroForecaster(), 10, np.ones(1), max_fallback=0)
+
+
+def test_a_bounded_fallback_releases_and_starts_counting_again():
+    x = np.zeros((70, 1), np.float32)
+    x[20:60, 0] = 5.0   # far from the forecast (0) for 40 rows
+    rows = np.arange(10, 70)
+    _, fallback = ForecastFallbackDetector(ZeroForecaster(), 10, np.ones(1), max_fallback=5,
+                                           verbose=False).run(x, rows)
+    # 3 rows to trigger, 5 rows in fallback, released, 3 rows to trigger again, ...
+    expected = [r for start in (22, 30, 38, 46, 54) for r in range(start, start + 5)]
+    assert rows[fallback[:, 0]].tolist() == expected
+
+
+def test_a_release_puts_the_real_values_back_into_the_input():
+    x = np.zeros((40, 1), np.float32)
+    x[20:40, 0] = 5.0
+    rows = np.arange(10, 40)
+    spy = ZeroForecaster()
+    ForecastFallbackDetector(spy, 10, np.ones(1), max_fallback=5, verbose=False).run(x, rows)
+    context_of = dict(zip(rows, spy.contexts))
+    assert context_of[27][0, -5:].tolist() == [0.0] * 5   # rows 22-26 still replaced by the forecast
+    assert context_of[28][0, -6:].tolist() == [5.0] * 6   # released at 27: rows 22-27 real again
+
+
+def test_a_bounded_fallback_stops_a_forecast_running_away():
+    """Lowe's rule with a trend-following forecaster on a tank-like ramp: at
+    the first turn the sensor enters fallback, the forecast keeps climbing,
+    its error never drops back, and the forecast runs off. Bounded, it
+    re-syncs after at most `max_fallback` rows."""
+    x = triangle()
+    rows = np.arange(20, 1500)
+    thresholds = np.full(1, 0.01)
+    literal, literal_fb = ForecastFallbackDetector(TrendForecaster(), 20, thresholds, verbose=False).run(x, rows)
+    bounded, _ = ForecastFallbackDetector(TrendForecaster(), 20, thresholds, max_fallback=20,
+                                          verbose=False).run(x, rows)
+    assert literal_fb[-500:].all() and np.abs(literal).max() > 10     # stuck in fallback, running off
+    assert np.abs(bounded).max() < 2                                   # never far outside the 0-1 range
+
+
+@pytest.mark.parametrize("horizon", [1, 3])
+def test_lockstep_matches_runs_on_their_own_with_bounded_fallback(horizon):
+    x = np.concatenate([held_attack(600, 300, 450, seed=3), held_attack(700, 200, 500, seed=4)])
+    rows = np.r_[50:600, 700:1300]
+    det = ForecastFallbackDetector(MeanForecaster(), 50, np.full((horizon, 2), 0.05), horizon,
+                                   max_fallback=40, verbose=False)
+    both = det.run(x, rows)
+    first, second = det.run(x, rows[rows < 600]), det.run(x, rows[rows >= 700])
+    assert np.array_equal(both[0], np.concatenate([first[0], second[0]]))
+    assert np.array_equal(both[1], np.concatenate([first[1], second[1]]))
+
+
+def test_a_bounded_run_resumes_to_the_same_result(tmp_path):
+    x = held_attack()
+    rows = np.arange(50, 1000)
+    kwargs = dict(thresholds=np.full(2, 0.1), max_fallback=30, verbose=False)
+    full = ForecastFallbackDetector(MeanForecaster(), 50, **kwargs).run(x, rows)
+    attack = (rows >= 502) & (rows < 900)
+    assert full[1][attack, 0].any() and not full[1][attack, 0].all()   # releases do happen
+
+    class DeadlineAfter(MeanForecaster):
+        def predict(self, contexts, horizon):
+            if self.calls == 520:   # inside the attack, between releases
+                det.deadline = time.time() - 1
+            return super().predict(contexts, horizon)
+
+    det = ForecastFallbackDetector(DeadlineAfter(), 50, **kwargs)
+    with pytest.raises(TimeLimitReached):
+        det.run(x, rows, cache_dir=tmp_path)
+    again = ForecastFallbackDetector(MeanForecaster(), 50, **kwargs).run(x, rows, cache_dir=tmp_path)
+    assert np.array_equal(full[0], again[0]) and np.array_equal(full[1], again[1])
+    with pytest.raises(ValueError, match="fallback_max_rows"):
+        ForecastFallbackDetector(MeanForecaster(), 50, np.full(2, 0.1), max_fallback=31,
+                                 verbose=False).run(x, rows, cache_dir=tmp_path)

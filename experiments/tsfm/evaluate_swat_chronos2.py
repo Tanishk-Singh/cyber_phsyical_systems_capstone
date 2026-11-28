@@ -33,7 +33,7 @@ zero-shot Chronos-2 learned nothing, so it scores every validation row.
 Reads
   results/pca/{plain,windowed_w50}/, results/cnn/seed{0,1,2}/   (Phase A)
   results/tsfm/chronos2/<setting>/                              (Step B4, any found)
-  results/tsfm/chronos2_ff/<setting>/                           (Step B5, any found)
+  results/tsfm/chronos2_ff/<setting>/<variant>/                 (Step B5, any found)
 Writes (git-ignored) results/tsfm_eval/: overall.csv, per_type.csv,
 per_attack.csv, groups.json, cache/ (VUS results; reruns are fast and only
 compute what is new, e.g. after more per-sensor settings arrive).
@@ -62,8 +62,11 @@ sys.path.insert(0, str(REPO_ROOT / "codebase"))
 from swat_cycle_analysis import SWAT_DIR  # noqa: E402
 
 RESULTS = REPO_ROOT / "results"
-TSFM_RUNS = {"Chronos-2": RESULTS / "tsfm" / "chronos2",           # Step B4, no fallback
-             "Chronos-2 FF": RESULTS / "tsfm" / "chronos2_ff"}     # Step B5, Forecast Fallback
+TSFM_RUNS = {   # display label: summary files to look for, under results/tsfm/
+    "Chronos-2": "chronos2/*/summary.json",                         # Step B4, no fallback
+    "Chronos-2 FF-Lowe": "chronos2_ff/*/lowe/summary.json",         # Step B5, the published rule
+    "Chronos-2 FF-bounded": "chronos2_ff/*/bounded/summary.json",   # Step B5, ours (additions A + B)
+}
 OUT_DIR = RESULTS / "tsfm_eval"
 CACHE = OUT_DIR / "cache"
 BASELINES = {
@@ -79,10 +82,10 @@ TYPES = ("SSSP", "SSMP", "MSMP")
 
 def chronos_settings():
     """{display name: (folder, context)} for every finished Chronos-2 setting,
-    e.g. "Chronos-2 joint 128x32" and "Chronos-2 FF joint 128x32"."""
+    e.g. "Chronos-2 joint 128x32" and "Chronos-2 FF-bounded joint 128x32"."""
     found = {}
-    for label, folder in TSFM_RUNS.items():
-        for summary in sorted(folder.glob("*/summary.json")):
+    for label, pattern in TSFM_RUNS.items():
+        for summary in sorted((RESULTS / "tsfm").glob(pattern)):
             s = json.loads(summary.read_text())
             found[f"{label} {s['mode']} {s['context']}x{s['horizon']}"] = (summary.parent, s["context"])
     return found

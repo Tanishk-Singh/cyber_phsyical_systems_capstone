@@ -46,6 +46,33 @@ them, and the replaced values enter the context of the next origin. Rows of
 the same block are already forecast, so replacing one cannot change the
 others in its block.
 
+Two additions of ours (Step B5 finding, 2026-11-28)
+---------------------------------------------------
+The literal rule above was run on SWaT at context 128, horizon 32. Tank
+levels (LIT101/301/401) went into fallback on most BENIGN validation rows and
+never came back, and their forecasts ran away (to about 1e34): two separate
+failures, each with its own fix. Neither uses attack labels; both are off by
+default, so the literal rule stays available as the reproduction.
+
+  A. Thresholds per forecast step (pass `thresholds` as (horizon, n_sensors)).
+     With one threshold per sensor, taken over errors at all leads together,
+     a sensor's far-ahead errors (lead 20-32 of a ramp) exceed it for many
+     rows in a row on normal data, so the trigger fires without an attack.
+     Comparing the error at lead k with benign errors at lead k removes
+     that. At horizon 1 it changes nothing.
+  B. Bounded fallback (`max_fallback` rows). With the literal release rule a
+     sensor whose forecast has drifted from reality never gets its error
+     back under the threshold, and the model, reading only its own output,
+     extends its own trend without end. Here a sensor that has been in
+     fallback for `max_fallback` rows in a row is released: the real values
+     of the rows it spent in fallback are put back into the input, so the
+     model re-syncs with what the plant really did, and the count starts
+     again from 0 (re-entering needs `trigger` new exceeding rows). The run
+     script uses max_fallback = context: the model never forecasts a sensor
+     from a context made only of its own forecasts. The price: an attack
+     held for longer than max_fallback rows is copied again after the
+     release, as without fallback.
+
 Why forecasts are made one origin at a time
 -------------------------------------------
 Every forecast depends on which earlier rows were replaced, so the origins of
@@ -53,13 +80,13 @@ one stretch of consecutive rows (a "run") must be forecast in order. Separate
 runs are independent: the fallback state starts fresh at the first row of
 each run, whose context is all real data. So all runs advance together (in
 "lockstep") and their next origins share one forward pass. The SWaT Attack
-file has 2 runs (the 82 s gap splits it); the validation rows have about 20
-(one per stretch of validation blocks). A run whose context would reach back
-into an earlier run is refused, because it would read replaced values.
+file has 2 runs (the 82 s gap splits it); the validation rows have 19 (one
+per stretch of validation blocks). A run whose context would reach back into
+an earlier run is refused, because it would read replaced values.
 
 Long runs
 ---------
-With `cache_dir` the whole state (forecasts so far, which inputs were
+With `cache_dir` the whole state (forecasts so far, which inputs are
 replaced, the counters, how many lockstep steps are done) is saved every
 `checkpoint_minutes`, and also when `deadline` (a time.time() value) passes,
 in which case TimeLimitReached is raised. The same call later loads the state
@@ -67,7 +94,7 @@ and continues; the result is the same as an uninterrupted run, because the
 saved state is everything the remaining forecasts depend on. A hard stop
 (Ctrl+C, shutdown) loses at most the work since the last checkpoint. A
 manifest refuses a folder that belongs to a different run (other thresholds,
-trigger, rows, data or model).
+trigger, max_fallback, rows, data or model).
 
 Repeatability
 -------------
@@ -101,20 +128,32 @@ MIN_THRESHOLD = 1e-6
 STATE_FILE = "state.npz"
 
 
-def fallback_thresholds(errors: np.ndarray, percentile: float = FF_PERCENTILE,
-                        floor: float = MIN_THRESHOLD) -> np.ndarray:
+def fallback_thresholds(errors: np.ndarray, leads: np.ndarray | None = None, horizon: int | None = None,
+                        percentile: float = FF_PERCENTILE, floor: float = MIN_THRESHOLD) -> np.ndarray:
     """Per-sensor fallback thresholds from benign forecast errors.
 
     errors: (n_rows, n_sensors) absolute errors of the PLAIN forecaster (no
-    fallback) on benign rows. Returns (n_sensors,): each sensor's
-    `percentile`-th percentile, but at least `floor`.
+    fallback) on benign rows. Without `leads`, returns (n_sensors,): each
+    sensor's `percentile`-th percentile over all rows (Lowe et al.). With
+    `leads` (the lead 0..horizon-1 of every row, from `origins`) and
+    `horizon`, returns (horizon, n_sensors): the percentile of each sensor at
+    each lead separately (addition A). Never below `floor`.
     """
     errors = np.asarray(errors, float)
     if errors.ndim != 2 or len(errors) == 0:
         raise ValueError(f"errors must be (n_rows, n_sensors) with at least one row, got {errors.shape}")
     if not np.isfinite(errors).all():
         raise ValueError("errors contain NaN or inf")
-    return np.maximum(np.percentile(errors, percentile, axis=0), floor)
+    if leads is None:
+        return np.maximum(np.percentile(errors, percentile, axis=0), floor)
+    leads = np.asarray(leads)
+    if horizon is None or leads.shape != (len(errors),):
+        raise ValueError("per-lead thresholds need one lead per row and the horizon")
+    missing = sorted(set(range(horizon)) - set(np.unique(leads).tolist()))
+    if missing or leads.min() < 0 or leads.max() >= horizon:
+        raise ValueError(f"leads must cover exactly 0..{horizon - 1} (missing {missing})")
+    return np.maximum(np.stack([np.percentile(errors[leads == k], percentile, axis=0)
+                                for k in range(horizon)]), floor)
 
 
 def spread_blocks(rows: np.ndarray, horizon: int, n_rows: int) -> np.ndarray:
@@ -154,26 +193,38 @@ class ForecastFallbackDetector(ForecastDetector):
         forecasts, fallback = det.run(split.test, rows, cache_dir=out / "state_test")
         scores = np.abs(forecasts - split.test[rows]).mean(axis=1)
 
-    predict / errors / score / score_series work as in ForecastDetector and
-    return the fallback forecasts; `run` also returns which inputs were
-    replaced. batch_size counts origins per forecaster call (all runs'
-    current origins go into one call, split into batches of this size).
+    thresholds: (n_sensors,) for Lowe et al.'s rule, or (horizon, n_sensors)
+    for one threshold per lead (addition A). max_fallback: None for Lowe et
+    al.'s rule, or the most rows in a row a sensor stays in fallback
+    (addition B). predict / errors / score / score_series work as in
+    ForecastDetector and return the fallback forecasts; `run` also returns
+    which rows were in fallback. batch_size counts origins per forecaster
+    call (all runs' current origins go into one call, split into batches of
+    this size).
     """
 
     def __init__(self, forecaster: Forecaster, context: int, thresholds: np.ndarray, horizon: int = 1,
-                 joint: bool = True, trigger: int = FF_TRIGGER, batch_size: int = 256,
-                 checkpoint_minutes: float = 5.0, deadline: float | None = None, verbose: bool = True):
+                 joint: bool = True, trigger: int = FF_TRIGGER, max_fallback: int | None = None,
+                 batch_size: int = 256, checkpoint_minutes: float = 5.0, deadline: float | None = None,
+                 verbose: bool = True):
         super().__init__(forecaster, context, horizon, joint, batch_size, deadline=deadline, verbose=verbose)
         thresholds = np.asarray(thresholds, float)
-        if thresholds.ndim != 1 or np.isnan(thresholds).any() or (thresholds < 0).any():
-            raise ValueError("thresholds must be a 1-D array of non-negative numbers (one per sensor)")
+        if thresholds.ndim not in (1, 2) or np.isnan(thresholds).any() or (thresholds < 0).any():
+            raise ValueError("thresholds must be (n_sensors,) or (horizon, n_sensors), non-negative")
+        if thresholds.ndim == 2 and len(thresholds) != horizon:
+            raise ValueError(f"per-lead thresholds have {len(thresholds)} leads for horizon {horizon}")
         if trigger < 1:
             raise ValueError("trigger must be at least 1")
-        self.thresholds, self.trigger = thresholds, trigger
+        if max_fallback is not None and max_fallback < 1:
+            raise ValueError("max_fallback must be at least 1 (or None for no limit)")
+        self.thresholds, self.trigger, self.max_fallback = thresholds, trigger, max_fallback
+        # one row of thresholds per lead, whichever form was given
+        self._lead_thresholds = np.broadcast_to(thresholds, (horizon, thresholds.shape[-1]))
         self.checkpoint_minutes = checkpoint_minutes
 
     def config(self) -> dict:
         return {**super().config(), "fallback_trigger": self.trigger,
+                "fallback_per_lead": self.thresholds.ndim == 2, "fallback_max_rows": self.max_fallback,
                 "fallback_thresholds_sha1": hashlib.sha1(np.ascontiguousarray(self.thresholds)).hexdigest()}
 
     def _manifest(self, x: np.ndarray, rows: np.ndarray) -> dict:
@@ -187,12 +238,13 @@ class ForecastFallbackDetector(ForecastDetector):
 
     def run(self, x: np.ndarray, rows: np.ndarray, cache_dir=None) -> tuple[np.ndarray, np.ndarray]:
         """(forecasts, fallback), both (len(rows), n_sensors): the forecast of
-        each row, and True where that row's value was replaced by its
-        forecast in the input that later forecasts read."""
+        each row, and True where the sensor was in fallback at that row (its
+        forecast replaced its value in the input that later forecasts read,
+        until a bounded fallback released it and put the real value back)."""
         rows = np.asarray(rows, np.int64)
         n_rows, n_sensors = len(rows), x.shape[1]
-        if len(self.thresholds) != n_sensors:
-            raise ValueError(f"{len(self.thresholds)} thresholds for {n_sensors} sensors")
+        if self.thresholds.shape[-1] != n_sensors:
+            raise ValueError(f"{self.thresholds.shape[-1]} thresholds for {n_sensors} sensors")
         if n_rows and rows[0] < self.context:
             raise ValueError(f"row {rows[0]} has fewer than context={self.context} rows before it")
         origin_idx, lead = origins(rows, self.horizon)   # also checks rows are sorted and unique
@@ -219,15 +271,18 @@ class ForecastFallbackDetector(ForecastDetector):
 
         # ---- state: fresh, or loaded from the last checkpoint
         forecasts = np.zeros((n_rows, n_sensors), np.float32)
-        fallback = np.zeros((n_rows, n_sensors), bool)
-        counts = np.zeros((n_runs, n_sensors), np.int64)
+        fallback = np.zeros((n_rows, n_sensors), bool)   # in fallback at that row
+        replaced = np.zeros((n_rows, n_sensors), bool)   # forecast still stands in for the value in the input
+        counts = np.zeros((n_runs, n_sensors), np.int64)    # exceeding rows in a row
+        lengths = np.zeros((n_runs, n_sensors), np.int64)   # fallback rows in a row
         done_steps = 0
         state_path = None
         if cache_dir is not None:
             state_path = self._open_cache(cache_dir, x, rows) / STATE_FILE
             if state_path.exists():
                 with np.load(state_path) as saved:
-                    forecasts, fallback, counts = saved["forecasts"], saved["fallback"], saved["counts"]
+                    forecasts, fallback, replaced = saved["forecasts"], saved["fallback"], saved["replaced"]
+                    counts, lengths = saved["counts"], saved["lengths"]
                     done_steps = int(saved["done_steps"])
                 if forecasts.shape != (n_rows, n_sensors) or counts.shape != (n_runs, n_sensors):
                     raise ValueError(f"{state_path} does not fit these rows; delete the folder")
@@ -236,11 +291,11 @@ class ForecastFallbackDetector(ForecastDetector):
         # the input the forecaster reads: real data, with the replaced values put back
         x_in = np.array(x, dtype=np.float32)
         done = step_of_row < done_steps
-        x_in[rows[done]] = np.where(fallback[done], forecasts[done], x_in[rows[done]])
+        x_in[rows[done]] = np.where(replaced[done], forecasts[done], x_in[rows[done]])
 
         def save(steps):
-            _save_atomic(state_path, forecasts=forecasts, fallback=fallback, counts=counts,
-                         done_steps=np.int64(steps))
+            _save_atomic(state_path, forecasts=forecasts, fallback=fallback, replaced=replaced,
+                         counts=counts, lengths=lengths, done_steps=np.int64(steps))
 
         start = last_save = time.perf_counter()
         for step in range(done_steps, n_steps):
@@ -252,15 +307,24 @@ class ForecastFallbackDetector(ForecastDetector):
             positions = origin_pos[batch]
             predicted = self._forecast(x_in, rows[positions])   # (n_origins, n_sensors, horizon)
             for p, run, forecast in zip(positions, run_of_origin[batch], predicted):
-                count = counts[run].copy()
+                count, length = counts[run].copy(), lengths[run].copy()
                 for k in range(block_len[p]):
                     i = p + k
                     guess = forecast[:, k]
-                    count = np.where(np.abs(x[rows[i]] - guess) > self.thresholds, count + 1, 0)
+                    count = np.where(np.abs(x[rows[i]] - guess) > self._lead_thresholds[k], count + 1, 0)
                     replace = count >= self.trigger
+                    if self.max_fallback is not None:
+                        expired = replace & (length >= self.max_fallback)
+                        for j in np.flatnonzero(expired):   # release: re-sync with what really happened
+                            episode = slice(i - length[j], i)
+                            x_in[rows[episode], j] = x[rows[episode], j]
+                            replaced[episode, j] = False
+                        count[expired] = 0
+                        replace &= ~expired
+                    length = np.where(replace, length + 1, 0)
                     x_in[rows[i], replace] = guess[replace]
-                    forecasts[i], fallback[i] = guess, replace
-                counts[run] = count
+                    forecasts[i], fallback[i], replaced[i] = guess, replace, replace
+                counts[run], lengths[run] = count, length
             now = time.perf_counter()
             if state_path is not None and now - last_save >= 60 * self.checkpoint_minutes:
                 save(step + 1)
